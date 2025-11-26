@@ -1,0 +1,3792 @@
+<!DOCTYPE html>
+<!--
+    RouteMind - Canlı Demo
+    Bu dosya; sürücü mobil uygulaması ile yönetici panelinin aynı sayfa içinde
+    gerçek zamanlı olarak simüle edildiği tek bir HTML dosyasıdır.
+
+    Ana bileşenler:
+    - Sol tarafta: Sürücü mobil uygulaması (giriş, paket yükleme, rota optimizasyonu,
+      teslimat ekranı, fotoğraf / imza / SMS onayı adımları).
+    - Sağ tarafta: Yönetici paneli (harita, araçlar, canlı durumlar, bildirimler,
+      rapor & istatistik ekranları, sürücü yönetimi).
+
+    Bu sürüm; yatırımcı sunumlarında anlatımı kolaylaştırmak için açıklayıcı
+    yorum satırları eklenmiş ve kullanılmayan bazı yardımcı fonksiyonlar
+    temizlenmiş HALDİR.
+-->
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RouteMind - Canlı Demo</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        .demo-container {
+            display: flex;
+            height: 100vh;
+            gap: 20px;
+            padding: 20px;
+        }
+
+        .demo-header {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 30px;
+            box-shadow: 0 2px 20px rgba(0,0,0,0.1);
+            z-index: 1000;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .demo-header h1 {
+            font-size: 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: 700;
+        }
+
+        .sync-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 16px;
+            background: #10b981;
+            color: white;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .sync-pulse {
+            width: 8px;
+            height: 8px;
+            background: white;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+        }
+
+        .mobile-section, .admin-section {
+            flex: 1;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+            margin-top: 80px;
+        }
+
+        .section-label {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 10px;
+            text-align: center;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        /* MOBILE APP STYLES */
+        .mobile-wrapper {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: calc(100% - 40px);
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            padding: 20px;
+        }
+
+        .phone-frame {
+            width: 375px;
+            height: 812px;
+            background: #1a1a1a;
+            border-radius: 40px;
+            padding: 14px;
+            box-shadow: 0 30px 80px rgba(0,0,0,0.4);
+            position: relative;
+        }
+
+        .phone-notch {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 200px;
+            height: 30px;
+            background: #1a1a1a;
+            border-radius: 0 0 20px 20px;
+            z-index: 10;
+        }
+
+        .phone-screen {
+            width: 100%;
+            height: 100%;
+            background: #f8f9fa;
+            border-radius: 32px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        .mobile-app {
+            min-height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .mobile-header {
+            background: rgba(255,255,255,0.15);
+            backdrop-filter: blur(10px);
+            padding: 50px 20px 20px;
+            color: white;
+        }
+
+        .mobile-header h2 {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+
+        .performance-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: rgba(255,255,255,0.2);
+            backdrop-filter: blur(10px);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+
+        .mobile-content {
+            padding: 20px;
+        }
+
+        /* Loading Screen */
+        .loading-screen {
+            text-align: center;
+            padding: 60px 20px;
+            color: white;
+        }
+
+        .loading-icon {
+            font-size: 80px;
+            animation: bounce 1s infinite;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-20px); }
+        }
+
+        .btn-primary {
+            width: 100%;
+            padding: 16px;
+            background: white;
+            color: #667eea;
+            border: none;
+            border-radius: 16px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 20px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+            transition: all 0.3s;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 30px rgba(0,0,0,0.15);
+        }
+
+        .btn-primary:active {
+            transform: scale(0.96);
+        }
+
+        /* Package List */
+        .package-list {
+            background: white;
+            border-radius: 16px;
+            padding: 15px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .package-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 12px;
+            margin-bottom: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .package-number {
+            width: 30px;
+            height: 30px;
+            background: #667eea;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .package-info {
+            flex: 1;
+        }
+
+        .package-address {
+            font-size: 14px;
+            color: #333;
+            font-weight: 500;
+        }
+
+        .package-barcode {
+            font-size: 12px;
+            color: #666;
+            font-family: monospace;
+        }
+
+        /* Optimization Screen */
+        .optimization-screen {
+            text-align: center;
+            padding: 60px 20px;
+            color: white;
+        }
+
+        .dna-icon {
+            font-size: 80px;
+            animation: rotate 2s linear infinite;
+        }
+
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: rgba(255,255,255,0.3);
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 20px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: white;
+            border-radius: 10px;
+            transition: width 0.3s;
+        }
+
+        /* Delivery Screen */
+        .delivery-screen {
+            padding-bottom: 20px;
+        }
+
+        .mini-map {
+            width: 100%;
+            height: 180px;
+            background: white;
+            border-radius: 16px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        .delivery-card {
+            background: white;
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .delivery-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+        }
+
+        .delivery-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .delivery-number {
+            font-size: 24px;
+            font-weight: 700;
+            color: #667eea;
+        }
+
+        .delivery-progress {
+            font-size: 14px;
+            color: #666;
+        }
+
+        .pause-info {
+            background: #fef3c7;
+            border-left: 4px solid #f59e0b;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .pause-info.emergency {
+            background: #fee2e2;
+            border-left-color: #dc2626;
+            animation: emergencyBlink 1s infinite;
+        }
+
+        @keyframes emergencyBlink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .address-box {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 15px;
+        }
+
+        .address-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .address-text {
+            font-size: 16px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .distance-info {
+            font-size: 14px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .action-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .btn-maps {
+            padding: 14px;
+            background: #4285f4;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-deliver {
+            padding: 14px;
+            background: #10b981;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-pause {
+            padding: 14px;
+            background: #ef4444;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-resume {
+            padding: 14px;
+            background: #f59e0b;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            max-width: 400px;
+            width: 90%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+
+        .modal-title {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .modal-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .modal-btn {
+            padding: 14px;
+            border: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .modal-btn-break {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .modal-btn-emergency {
+            background: #ef4444;
+            color: white;
+        }
+
+        .modal-btn-cancel {
+            background: #e5e7eb;
+            color: #666;
+        }
+
+        /* SMS Modal */
+        .sms-input {
+            width: 100%;
+            padding: 14px;
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            font-size: 16px;
+            text-align: center;
+            letter-spacing: 8px;
+            font-weight: 600;
+            margin: 15px 0;
+        }
+
+        .sms-hint {
+            text-align: center;
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 15px;
+        }
+
+        .sms-code-display {
+            background: #f3f4f6;
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 15px;
+        }
+
+        .sms-code {
+            font-size: 24px;
+            font-weight: 700;
+            color: #667eea;
+            font-family: monospace;
+        }
+
+        /* Point Popup */
+        .point-popup {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0);
+            background: white;
+            padding: 30px 40px;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            z-index: 2000;
+            text-align: center;
+            transition: transform 0.3s;
+        }
+
+        .point-popup.show {
+            transform: translate(-50%, -50%) scale(1);
+        }
+
+        .point-popup-icon {
+            font-size: 60px;
+            margin-bottom: 15px;
+        }
+
+        .point-popup-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: #10b981;
+            margin-bottom: 10px;
+        }
+
+        .point-popup-points {
+            font-size: 32px;
+            font-weight: 700;
+            color: #667eea;
+        }
+
+        /* ADMIN PANEL STYLES */
+        .admin-wrapper {
+            height: calc(100% - 40px);
+            display: flex;
+            flex-direction: column;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        }
+
+        .admin-topbar {
+            background: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 3px solid transparent;
+            border-image: linear-gradient(90deg, #667eea, #764ba2);
+            border-image-slice: 1;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+
+        .admin-title {
+            font-size: 20px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .admin-stats {
+            display: flex;
+            gap: 20px;
+            font-size: 14px;
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .stat-value {
+            font-weight: 700;
+            color: #667eea;
+        }
+
+        .notification-bell {
+            position: relative;
+            cursor: pointer;
+            font-size: 24px;
+            transition: transform 0.3s;
+        }
+
+        .notification-bell:hover {
+            transform: scale(1.1);
+        }
+
+        .notification-badge {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: #ef4444;
+            color: white;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+        }
+
+        .notification-panel {
+            position: absolute;
+            top: 60px;
+            right: 20px;
+            width: 350px;
+            max-height: 500px;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+            overflow: hidden;
+            display: none;
+            z-index: 100;
+        }
+
+        .notification-panel.active {
+            display: block;
+        }
+
+        .notification-header {
+            padding: 15px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .notification-list {
+            max-height: 400px;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .notification-item {
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+            border-left: 4px solid;
+        }
+
+        .notification-item.delivery {
+            background: #d1fae5;
+            border-left-color: #10b981;
+        }
+
+        .notification-item.break {
+            background: #dbeafe;
+            border-left-color: #3b82f6;
+        }
+
+        .notification-item.emergency {
+            background: #fee2e2;
+            border-left-color: #ef4444;
+        }
+
+        .notification-time {
+            font-size: 11px;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        .admin-content {
+            flex: 1;
+            display: flex;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .admin-map {
+            flex: 1;
+            position: relative;
+        }
+
+        #adminMap {
+            width: 100%;
+            height: 100%;
+        }
+
+        .optimization-badge {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(16, 185, 129, 0.95);
+            backdrop-filter: blur(10px);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 30px;
+            font-weight: 600;
+            box-shadow: 0 8px 20px rgba(16, 185, 129, 0.3);
+            z-index: 500;
+            display: none;
+        }
+
+        .optimization-badge.show {
+            display: block;
+            animation: slideDown 0.5s;
+        }
+
+        @keyframes slideDown {
+            from {
+                transform: translateX(-50%) translateY(-20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(-50%) translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .vehicle-overlay {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(255,255,255,0.95);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 16px;
+            width: 350px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            border: 2px solid rgba(102, 126, 234, 0.2);
+            display: none;
+            z-index: 500;
+        }
+
+        .vehicle-overlay.active {
+            display: block;
+            animation: slideUp 0.3s;
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .vehicle-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #f3f4f6;
+        }
+
+        .vehicle-name {
+            font-size: 18px;
+            font-weight: 700;
+            color: #333;
+        }
+
+        .close-overlay {
+            cursor: pointer;
+            font-size: 24px;
+            color: #666;
+        }
+
+        .emergency-warning {
+            background: #fee2e2;
+            color: #dc2626;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            font-weight: 600;
+            text-align: center;
+            border-left: 4px solid #dc2626;
+        }
+
+        .vehicle-info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .info-item {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 8px;
+        }
+
+        .info-label {
+            font-size: 11px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+
+        .info-value {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .optimization-box {
+            background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+            padding: 15px;
+            border-radius: 12px;
+            border-left: 4px solid #10b981;
+            margin-bottom: 15px;
+        }
+
+        .optimization-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .optimization-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: #065f46;
+        }
+
+        .optimization-percent {
+            font-size: 20px;
+            font-weight: 700;
+            color: #059669;
+        }
+
+        .optimization-details {
+            font-size: 13px;
+            color: #047857;
+        }
+
+        .reports-btn {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            color: #667eea;
+            padding: 14px 24px;
+            border: none;
+            border-radius: 30px;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+            transition: all 0.3s;
+            z-index: 500;
+        }
+
+        .reports-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 30px rgba(0,0,0,0.2);
+        }
+
+        .reports-panel {
+            position: absolute;
+            top: 0;
+            right: -400px;
+            width: 400px;
+            height: 100%;
+            background: white;
+            box-shadow: -5px 0 30px rgba(0,0,0,0.2);
+            transition: right 0.3s;
+            overflow-y: auto;
+            z-index: 600;
+        }
+
+        .reports-panel.active {
+            right: 0;
+        }
+
+        .reports-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .reports-close {
+            cursor: pointer;
+            font-size: 24px;
+        }
+
+        .reports-content {
+            padding: 20px;
+        }
+
+        .report-section {
+            margin-bottom: 25px;
+        }
+
+        .report-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .stat-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 10px;
+        }
+
+        .stat-card-header {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .stat-card-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #667eea;
+        }
+
+        .stat-card-change {
+            font-size: 12px;
+            color: #10b981;
+            margin-top: 5px;
+        }
+
+        .learning-chart {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 12px;
+            height: 200px;
+            display: flex;
+            align-items: flex-end;
+            gap: 8px;
+        }
+
+        .chart-bar {
+            flex: 1;
+            background: linear-gradient(to top, #667eea, #764ba2);
+            border-radius: 4px 4px 0 0;
+            transition: all 0.3s;
+            position: relative;
+        }
+
+        .chart-bar:hover {
+            opacity: 0.8;
+        }
+
+        /* Toast Notification */
+        .toast-notification {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            padding: 15px 20px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            z-index: 2000;
+            transform: translateX(500px);
+            transition: transform 0.3s;
+        }
+
+        .toast-notification.show {
+            transform: translateX(0);
+        }
+
+        .toast-icon {
+            font-size: 24px;
+        }
+
+        .toast-content {
+            flex: 1;
+        }
+
+        .toast-title {
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+        }
+
+        .toast-message {
+            font-size: 13px;
+            color: #666;
+        }
+
+        /* Leaflet custom styles */
+        .vehicle-marker {
+            background: white;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            border: 3px solid;
+        }
+
+        .vehicle-marker.blue {
+            border-color: #3b82f6;
+        }
+
+        .vehicle-marker.green {
+            border-color: #10b981;
+        }
+
+        .vehicle-marker.orange {
+            border-color: #f59e0b;
+        }
+
+        .emergency-marker::after {
+            content: '❗';
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            background: #ef4444;
+            color: white;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            animation: emergencyPulse 1s infinite;
+        }
+
+        @keyframes emergencyPulse {
+            0%, 100% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+            }
+            50% {
+                transform: scale(1.1);
+                box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+            }
+        }
+        
+        /* Barcode Scanner Styles */
+        #barcode-scanner canvas,
+        #barcode-scanner video {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover;
+            border-radius: 12px;
+        }
+        
+        #barcode-scanner .drawingBuffer {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="demo-header">
+        <h1>🚚 RouteMind - Canlı Demo</h1>
+        <div class="sync-indicator">
+            <div class="sync-pulse"></div>
+            Gerçek Zamanlı Senkronizasyon
+        </div>
+    </div>
+
+    <div class="demo-container">
+        <!-- MOBILE APP SECTION -->
+        <div class="mobile-section">
+            <div class="section-label">📱 SÜRÜCÜ MOBİL UYGULAMASI</div>
+            <div class="mobile-wrapper">
+                <div class="phone-frame">
+                    <div class="phone-notch"></div>
+                    <div class="phone-screen">
+                        <div class="mobile-app" id="mobileApp">
+                            <!-- Mobile app content will be rendered here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ADMIN PANEL SECTION -->
+        <div class="admin-section">
+            <div class="section-label">💻 YÖNETİCİ PANELİ</div>
+            <div class="admin-wrapper">
+                <div class="admin-topbar">
+                    <div class="admin-title">Yönetim Paneli</div>
+                    <div class="admin-stats">
+                        <div class="stat-item">
+                            🚚 <span class="stat-value" id="totalVehicles">3</span> Sürücü
+                        </div>
+                        <div class="stat-item">
+                            📦 <span class="stat-value" id="totalPackages">53</span> Paket
+                        </div>
+                        <div class="stat-item">
+                            ✅ <span class="stat-value" id="completedPackages">0</span> Tamamlanan
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 15px; align-items: center;">
+                        <button onclick="showSimpleAnalytics()" style="background: linear-gradient(135deg, #f59e0b, #d97706); color: white; border: none; padding: 10px 20px; border-radius: 10px; font-weight: 600; cursor: pointer; font-size: 14px;">
+                            📊 İstatistikler
+                        </button>
+                        <button onclick="openUserManagement()" style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; padding: 10px 20px; border-radius: 10px; font-weight: 600; cursor: pointer; font-size: 14px;">
+                            👥 Sürücü Yönetimi
+                        </button>
+                        <div class="notification-bell" id="notificationBell">
+                            🔔
+                            <span class="notification-badge" id="notificationBadge">0</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="admin-content">
+                    <div class="admin-map">
+                        <div id="adminMap"></div>
+                        <div class="optimization-badge" id="optimizationBadge">
+                            ✨ Rotalar AI ile optimize edildi - %35 tasarruf
+                        </div>
+                        <div class="vehicle-overlay" id="vehicleOverlay"></div>
+                        <button class="reports-btn" id="reportsBtn">📊 Raporlar & İstatistikler</button>
+                    </div>
+                    <div class="reports-panel" id="reportsPanel"></div>
+                </div>
+            </div>
+            <div class="notification-panel" id="notificationPanel"></div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal" id="pauseModal"></div>
+    <div class="modal" id="smsModal"></div>
+    <div class="point-popup" id="pointPopup"></div>
+    <div class="toast-notification" id="toastNotification"></div>
+
+    <script>
+        // GLOBAL STATE
+        // - Mobil uygulama ve yönetici paneli tek bir "state" nesnesi üzerinden yönetilir.
+        // - Sürücüler, paketler, duraklama bilgileri, harita nesneleri ve oturum gibi
+        //   tüm kritik bilgiler burada tutulur.
+        // - Yatırımcıya anlatırken: "Tek merkezden yönetilen canlı bir simülasyon" diyebilirsiniz.
+        const state = {
+            isAuthenticated: false,
+            currentUser: null,
+            currentScreen: 'login',
+            packages: [],
+            currentDeliveryIndex: 0,
+            performanceScore: 100,
+            isPaused: false,
+            pauseType: null,
+            pauseStartTime: null,
+            pauseTimerInterval: null,
+            optimizationProgress: 0,
+            notifications: [],
+            selectedVehicle: null,
+            isScanningBarcode: false,
+            depot: {
+                name: 'RouteMind Merkez Depo',
+                address: 'Ataşehir Bulvarı No:142, Ataşehir, İstanbul',
+                lat: 40.9867,
+                lng: 29.1259
+            },
+            vehicles: [
+                {
+                    id: 1,
+                    name: 'Ahmet Yılmaz',
+                    username: 'ahmet',
+                    password: '1234',
+                    phone: '0555 123 45 67',
+                    color: 'blue',
+                    position: [40.9867, 29.1259], // Ataşehir
+                    completedDeliveries: 0,
+                    totalDeliveries: 20,
+                    startTime: '08:30',
+                    estimatedEnd: '13:15',
+                    avgSpeed: 28,
+                    savings: 35,
+                    status: 'active',
+                    isPaused: false,
+                    pauseType: null,
+                    pauseStartTime: null,
+                    route: []
+                },
+                {
+                    id: 2,
+                    name: 'Mehmet Demir',
+                    username: 'mehmet',
+                    password: '1234',
+                    phone: '0555 234 56 78',
+                    color: 'green',
+                    position: [40.9658, 29.0791],
+                    completedDeliveries: 8,
+                    totalDeliveries: 15,
+                    startTime: '08:45',
+                    estimatedEnd: '12:30',
+                    avgSpeed: 32,
+                    savings: 32,
+                    status: 'break',
+                    isPaused: true,
+                    pauseType: 'break',
+                    pauseStartTime: Date.now() - (18 * 60 * 1000), // 18 dakika önce başlamış
+                    breakDuration: 18,
+                    route: []
+                },
+                {
+                    id: 3,
+                    name: 'Can Özkan',
+                    username: 'can',
+                    password: '1234',
+                    phone: '0555 345 67 89',
+                    color: 'orange',
+                    position: [40.9923, 29.1145],
+                    completedDeliveries: 12,
+                    totalDeliveries: 18,
+                    startTime: '08:15',
+                    estimatedEnd: '12:45',
+                    avgSpeed: 25,
+                    savings: 38,
+                    status: 'emergency',
+                    isPaused: true,
+                    pauseType: 'emergency',
+                    pauseStartTime: Date.now() - (5 * 60 * 1000 + 23 * 1000), // 5dk 23sn önce başlamış
+                    route: []
+                }
+            ],
+            adminMap: null,
+            miniMap: null,
+            adminCredentials: {
+                username: 'admin',
+                password: 'admin123'
+            }
+        };
+
+        // Ataşehir coordinates
+        const atasehirAddresses = [
+            { name: 'Barbaros Mahallesi', lat: 40.9867, lng: 29.1259 },
+            { name: 'Yenisahra Mahallesi', lat: 40.9823, lng: 29.1198 },
+            { name: 'Ferhatpaşa Mahallesi', lat: 40.9756, lng: 29.1345 },
+            { name: 'Küçükbakkalköy', lat: 40.9789, lng: 29.1423 },
+            { name: 'Atatürk Mahallesi', lat: 40.9912, lng: 29.1287 },
+            { name: 'Örnek Mahallesi', lat: 40.9845, lng: 29.1156 },
+            { name: 'İnönü Mahallesi', lat: 40.9778, lng: 29.1289 },
+            { name: 'Esatpaşa Mahallesi', lat: 40.9834, lng: 29.1412 },
+            { name: 'Kayışdağı Mahallesi', lat: 40.9923, lng: 29.1345 },
+            { name: 'Mevlana Mahallesi', lat: 40.9801, lng: 29.1234 },
+            { name: 'Fetih Mahallesi', lat: 40.9889, lng: 29.1178 },
+            { name: 'Yeni Çamlıca', lat: 40.9756, lng: 29.1401 },
+            { name: 'Gökalp Mahallesi', lat: 40.9867, lng: 29.1323 },
+            { name: 'Mimarsinan Mahallesi', lat: 40.9798, lng: 29.1367 },
+            { name: 'Ünalan Mahallesi', lat: 40.9823, lng: 29.1289 },
+            { name: 'Küçüksu Mahallesi', lat: 40.9845, lng: 29.1401 },
+            { name: 'Acıbadem Mahallesi', lat: 40.9778, lng: 29.1234 },
+            { name: 'İçerenköy Mahallesi', lat: 40.9912, lng: 29.1198 },
+            { name: 'Kozyatağı Mahallesi', lat: 40.9801, lng: 29.1345 },
+            { name: 'Bostancı Mahallesi', lat: 40.9756, lng: 29.1289 }
+        ];
+
+        // Generate packages
+        
+        // MOBILE APP RENDERING (SÜRÜCÜ UYGULAMASI EKRANLARI)
+// Bu bölüm; mobil uygulamadaki ekranları DOM içerisine "yeniden çizen" fonksiyonları içerir.
+// Örnek: giriş ekranı, paket yükleme, AI rota optimizasyonu, teslimat ve tamamlandı ekranı.
+// Ekranlar "state.currentScreen" değerine göre tek bir yerde yönetilir.
+        function renderMobileApp() {
+            const app = document.getElementById('mobileApp');
+            
+            switch(state.currentScreen) {
+                case 'login':
+                    renderLogin();
+                    break;
+                    
+                case 'loading':
+                    app.innerHTML = `
+                        <div class="loading-screen">
+                            <div class="loading-icon">📦</div>
+                            <h2 style="margin: 20px 0; font-size: 24px;">RouteMind</h2>
+                            <p style="font-size: 16px; opacity: 0.8;">Hoş geldin, ${state.currentUser?.name}!</p>
+                            <button class="btn-primary" onclick="startPackageLoading()">
+                                Paket Yüklemeye Başla
+                            </button>
+                            <button class="btn-primary" onclick="logout()" style="background: rgba(255,255,255,0.2); margin-top: 10px;">
+                                Çıkış Yap
+                            </button>
+                        </div>
+                    `;
+                    break;
+
+                case 'packageLoading':
+                    renderPackageLoading();
+                    break;
+
+                case 'optimization':
+                    renderOptimization();
+                    break;
+
+                case 'delivery':
+                    renderDelivery();
+                    break;
+
+                case 'complete':
+                    renderComplete();
+                    break;
+            }
+        }
+        
+        function renderLogin() {
+            const app = document.getElementById('mobileApp');
+            app.innerHTML = `
+                <div class="loading-screen">
+                    <div style="font-size: 80px; margin-bottom: 20px;">🚚</div>
+                    <h2 style="font-size: 28px; margin-bottom: 10px;">RouteMind</h2>
+                    <p style="font-size: 14px; opacity: 0.8; margin-bottom: 40px;">Sürücü Girişi</p>
+                    
+                    <div style="background: white; border-radius: 20px; padding: 30px; max-width: 300px; margin: 0 auto;">
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; font-size: 12px; color: #666; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">
+                                Kullanıcı Adı
+                            </label>
+                            <input type="text" id="loginUsername" placeholder="ahmet" 
+                                style="width: 100%; padding: 14px; border: 2px solid #e5e7eb; border-radius: 12px; font-size: 15px; transition: all 0.3s;"
+                                onfocus="this.style.borderColor='#667eea'" onblur="this.style.borderColor='#e5e7eb'">
+                        </div>
+                        <div style="margin-bottom: 25px;">
+                            <label style="display: block; font-size: 12px; color: #666; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">
+                                Şifre
+                            </label>
+                            <input type="password" id="loginPassword" placeholder="••••" 
+                                style="width: 100%; padding: 14px; border: 2px solid #e5e7eb; border-radius: 12px; font-size: 15px; transition: all 0.3s;"
+                                onfocus="this.style.borderColor='#667eea'" onblur="this.style.borderColor='#e5e7eb'"
+                                onkeypress="if(event.key === 'Enter') attemptLogin()">
+                        </div>
+                        <button onclick="attemptLogin()" 
+                            style="width: 100%; padding: 16px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: 700; cursor: pointer; transition: all 0.3s; box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);"
+                            onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 12px 30px rgba(102, 126, 234, 0.4)'"
+                            onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 8px 20px rgba(102, 126, 234, 0.3)'">
+                            Giriş Yap
+                        </button>
+                        <div style="margin-top: 20px; text-align: center; font-size: 12px; color: #999;">
+                            Demo: ahmet / 1234
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function attemptLogin() {
+            const username = document.getElementById('loginUsername').value;
+            const password = document.getElementById('loginPassword').value;
+            
+            const user = state.vehicles.find(v => v.username === username && v.password === password);
+            
+            if (user) {
+                state.isAuthenticated = true;
+                state.currentUser = user;
+                state.currentScreen = 'loading';
+                renderMobileApp();
+                showToast('✅ Giriş Başarılı', `Hoş geldin ${user.name}!`);
+            } else {
+                showToast('❌ Hata', 'Kullanıcı adı veya şifre hatalı!');
+            }
+        }
+        
+        function logout() {
+            state.isAuthenticated = false;
+            state.currentUser = null;
+            state.currentScreen = 'login';
+            state.packages = [];
+            state.currentDeliveryIndex = 0;
+            state.performanceScore = 100;
+            renderMobileApp();
+            showToast('👋 Çıkış', 'Başarıyla çıkış yapıldı');
+        }
+
+        function renderPackageLoading() {
+            const app = document.getElementById('mobileApp');
+            app.innerHTML = `
+                <div class="mobile-header">
+                    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                        <div>
+                            <h2 style="margin: 0;">Paket Yükleme</h2>
+                            <div style="font-size: 13px; opacity: 0.8; margin-top: 3px;">
+                                Yüklenen: <strong>${state.packages.length}</strong> / 20
+                            </div>
+                        </div>
+                        <div style="width: 60px; height: 60px; border: 4px solid rgba(255,255,255,0.3); border-radius: 50%; display: flex; align-items: center; justify-content: center; position: relative;">
+                            <div style="position: absolute; inset: 0; border-radius: 50%; border: 4px solid white; border-top-color: transparent; transform: rotate(${(state.packages.length / 20) * 360}deg); transition: transform 0.3s;"></div>
+                            <span style="font-size: 18px; font-weight: 700;">${state.packages.length}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="mobile-content">
+                    <div style="text-align: center; margin-bottom: 25px;">
+                        <div style="font-size: 80px; margin-bottom: 15px; animation: bounce 2s infinite;">📦</div>
+                        <p style="color: white; font-size: 15px; opacity: 0.95; line-height: 1.5;">
+                            Barkod okutarak veya hızlı ekle ile<br>paketleri sisteme yükleyin
+                        </p>
+                    </div>
+                    
+                    <div style="display: grid; gap: 12px; margin-bottom: 25px;">
+                        <button class="btn-primary" onclick="scanBarcode()" style="background: white; color: #667eea; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 16px;">
+                            <span style="font-size: 24px;">📷</span>
+                            <span>Barkod Okut</span>
+                        </button>
+                        <button class="btn-primary" onclick="quickAdd()" style="background: rgba(255,255,255,0.2); backdrop-filter: blur(10px); color: white; border: 2px solid rgba(255,255,255,0.3); display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 16px;">
+                            <span style="font-size: 24px;">⚡</span>
+                            <span>Hızlı Ekle (5 Paket)</span>
+                        </button>
+                    </div>
+                    
+                    ${state.packages.length >= 5 ? `
+                        <button class="btn-primary" onclick="optimizeRoute()" 
+                            style="background: linear-gradient(135deg, #10b981, #059669); color: white; margin-bottom: 25px; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 17px; font-weight: 700; box-shadow: 0 10px 30px rgba(16, 185, 129, 0.4);">
+                            <span style="font-size: 28px;">🧬</span>
+                            <div>
+                                <div>Rotayı Optimize Et</div>
+                                <div style="font-size: 12px; opacity: 0.9; font-weight: 500;">${state.packages.length} paket hazır</div>
+                            </div>
+                        </button>
+                    ` : `
+                        <div style="background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); padding: 16px; border-radius: 16px; border: 2px dashed rgba(255,255,255,0.3); text-align: center; margin-bottom: 25px;">
+                            <div style="font-size: 14px; color: white; opacity: 0.9;">
+                                ⚠️ En az 5 paket yükleyin
+                            </div>
+                            <div style="font-size: 12px; color: white; opacity: 0.7; margin-top: 5px;">
+                                Rota optimizasyonu için minimum paket sayısı
+                            </div>
+                        </div>
+                    `}
+                    
+                    ${state.packages.length > 0 ? `
+                        <div style="background: white; border-radius: 20px; padding: 15px; max-height: 400px; overflow-y: auto;">
+                            <div style="font-size: 13px; font-weight: 700; color: #667eea; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">
+                                📋 Yüklenen Paketler
+                            </div>
+                            ${state.packages.map((pkg, idx) => `
+                                <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: ${idx % 2 === 0 ? '#f8f9fa' : 'white'}; border-radius: 12px; margin-bottom: 6px; border-left: 4px solid ${pkg.typeColor || '#667eea'};">
+                                    <div style="width: 36px; height: 36px; background: ${pkg.typeColor || 'linear-gradient(135deg, #667eea, #764ba2)'}; color: white; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; box-shadow: 0 4px 10px rgba(102, 126, 234, 0.3);">
+                                        ${pkg.typeIcon || (idx + 1)}
+                                    </div>
+                                    <div style="flex: 1;">
+                                        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 3px;">
+                                            <div style="font-size: 14px; font-weight: 600; color: #333;">${pkg.address}</div>
+                                            ${pkg.type ? `<span style="font-size: 10px; background: ${pkg.typeColor}; color: white; padding: 2px 6px; border-radius: 6px; font-weight: 600;">${pkg.type}</span>` : ''}
+                                        </div>
+                                        <div style="font-size: 11px; color: #999;">
+                                            ${pkg.barcode}
+                                            ${pkg.timeWindow ? ` • ⏰ ${pkg.timeWindow.start}-${pkg.timeWindow.end}` : ''}
+                                        </div>
+                                    </div>
+                                    <div style="font-size: 20px;">✅</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : `
+                        <div style="background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); padding: 40px 20px; border-radius: 20px; border: 2px dashed rgba(255,255,255,0.3); text-align: center;">
+                            <div style="font-size: 48px; margin-bottom: 15px; opacity: 0.5;">📭</div>
+                            <div style="font-size: 14px; color: white; opacity: 0.8;">
+                                Henüz paket yüklemediniz
+                            </div>
+                        </div>
+                    `}
+                </div>
+            `;
+        }
+
+        function renderOptimization() {
+            const app = document.getElementById('mobileApp');
+            app.innerHTML = `
+                <div class="optimization-screen">
+                    <div class="dna-icon">🧬</div>
+                    <h2 style="font-size: 24px; margin: 20px 0;">AI Rota Optimizasyonu</h2>
+                    <p style="font-size: 16px; opacity: 0.9; margin-bottom: 10px;">
+                        Genetik algoritma en iyi rotayı hesaplıyor...
+                    </p>
+                    <div style="font-size: 14px; opacity: 0.8; margin-bottom: 30px;">
+                        🏠 Başlangıç: ${state.depot.name}
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${state.optimizationProgress}%"></div>
+                    </div>
+                    <div style="font-size: 14px; margin-top: 10px;">
+                        Generasyon ${Math.floor(state.optimizationProgress / 2)}/50 - 
+                        İyileşme: ${Math.floor(state.optimizationProgress * 0.7)}%
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderDelivery() {
+            const app = document.getElementById('mobileApp');
+            const currentPkg = state.packages[state.currentDeliveryIndex];
+            const progress = ((state.currentDeliveryIndex + 1) / state.packages.length * 100).toFixed(0);
+            
+            app.innerHTML = `
+                <div class="mobile-header">
+                    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                        <div>
+                            <h2 style="margin: 0;">Teslimat</h2>
+                            <div style="font-size: 13px; opacity: 0.8; margin-top: 3px;">
+                                ${state.currentDeliveryIndex + 1} / ${state.packages.length}
+                            </div>
+                        </div>
+                        <div class="performance-badge">
+                            ⭐ ${state.performanceScore}
+                        </div>
+                    </div>
+                    <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.3); border-radius: 10px; margin-top: 15px; overflow: hidden;">
+                        <div style="width: ${progress}%; height: 100%; background: white; border-radius: 10px; transition: width 0.3s;"></div>
+                    </div>
+                </div>
+                <div class="delivery-screen">
+                    <div class="mini-map" id="miniMap"></div>
+                    <div style="padding: 0 20px;">
+                        ${state.isPaused ? `
+                            <div class="pause-info ${state.pauseType === 'emergency' ? 'emergency' : ''}" style="margin-top: 20px;">
+                                <div style="font-size: 28px;">
+                                    ${state.pauseType === 'break' ? '☕' : '🚨'}
+                                </div>
+                                <div style="flex: 1;">
+                                    <div style="font-weight: 700; font-size: 15px; margin-bottom: 4px;">
+                                        ${state.pauseType === 'break' ? 'MOLA' : 'KAZA BİLDİRİMİ'}
+                                    </div>
+                                    <div style="font-size: 20px; font-weight: 700; font-family: monospace;" id="pauseTimer">00:00</div>
+                                </div>
+                            </div>
+                        ` : ''}
+                        
+                        <div style="background: white; border-radius: 20px; padding: 20px; margin-top: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
+                            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">
+                                <div style="width: 50px; height: 50px; background: ${currentPkg.typeColor || 'linear-gradient(135deg, #667eea, #764ba2)'}; border-radius: 15px; display: flex; align-items: center; justify-content: center; font-size: 28px; color: white; font-weight: 700;">
+                                    ${currentPkg.typeIcon || currentPkg.id}
+                                </div>
+                                <div style="flex: 1;">
+                                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                                        <div style="font-size: 12px; color: #999; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Teslimat Adresi</div>
+                                        ${currentPkg.type ? `<span style="font-size: 11px; background: ${currentPkg.typeColor}; color: white; padding: 3px 8px; border-radius: 6px; font-weight: 600;">${currentPkg.type}</span>` : ''}
+                                    </div>
+                                    <div style="font-size: 17px; font-weight: 700; color: #333;">${currentPkg.address}</div>
+                                    ${currentPkg.timeWindow ? `
+                                        <div style="font-size: 12px; color: #f59e0b; margin-top: 4px; display: flex; align-items: center; gap: 6px;">
+                                            ⏰ Teslimat: ${currentPkg.timeWindow.start} - ${currentPkg.timeWindow.end}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                            
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px;">
+                                <div style="background: #f8f9fa; padding: 12px; border-radius: 12px; text-align: center;">
+                                    <div style="font-size: 11px; color: #999; margin-bottom: 4px;">MESAFE</div>
+                                    <div style="font-size: 18px; font-weight: 700; color: #667eea;">🚗 ${currentPkg.distance} km</div>
+                                </div>
+                                <div style="background: #f8f9fa; padding: 12px; border-radius: 12px; text-align: center;">
+                                    <div style="font-size: 11px; color: #999; margin-bottom: 4px;">SÜRE</div>
+                                    <div style="font-size: 18px; font-weight: 700; color: #667eea;">⏱️ ${currentPkg.duration}dk</div>
+                                </div>
+                            </div>
+                            
+                            <div style="border-top: 2px dashed #e5e7eb; padding-top: 15px;">
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                                    <div style="font-size: 12px; color: #999;">Müşteri Telefonu</div>
+                                    <button onclick="callCustomer('${currentPkg.phone}')" style="background: none; border: none; color: #667eea; font-weight: 600; cursor: pointer; font-size: 14px; padding: 4px 12px; border-radius: 6px; transition: all 0.2s;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='none'">
+                                        📞 ${currentPkg.phone}
+                                    </button>
+                                </div>
+                                <div style="font-size: 11px; color: #999; font-family: monospace;">Barkod: ${currentPkg.barcode}</div>
+                            </div>
+                        </div>
+                        
+                        <div style="margin-top: 20px; display: grid; gap: 12px;">
+                            <button class="btn-maps" onclick="openGoogleMaps(${currentPkg.lat}, ${currentPkg.lng})" ${state.isPaused ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''}>
+                                <span style="font-size: 20px; margin-right: 8px;">🧭</span>
+                                Navigasyonu Başlat
+                            </button>
+                            
+                            <button class="btn-deliver" onclick="deliverPackage()" ${state.isPaused ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''}>
+                                <span style="font-size: 20px; margin-right: 8px;">📦</span>
+                                Teslim Et
+                            </button>
+                            
+                            <button class="${state.isPaused ? 'btn-resume' : 'btn-pause'}" onclick="togglePause()">
+                                <span style="font-size: 18px; margin-right: 8px;">${state.isPaused ? '▶️' : '⏸️'}</span>
+                                ${state.isPaused ? 'Devam Et' : 'Durdur'}
+                            </button>
+                        </div>
+                        
+                        ${state.currentDeliveryIndex < state.packages.length - 1 ? `
+                            <div style="margin-top: 25px;">
+                                <div style="font-size: 13px; font-weight: 700; color: white; opacity: 0.9; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">
+                                    📋 Sonraki Teslimatlar
+                                </div>
+                                ${state.packages.slice(state.currentDeliveryIndex + 1, state.currentDeliveryIndex + 4).map((pkg, idx) => `
+                                    <div style="background: rgba(255,255,255,0.15); backdrop-filter: blur(10px); padding: 14px 16px; border-radius: 14px; margin-bottom: 10px; display: flex; align-items: center; gap: 12px; border: 1px solid rgba(255,255,255,0.2);">
+                                        <div style="width: 32px; height: 32px; background: ${pkg.typeColor ? pkg.typeColor : 'rgba(255,255,255,0.3)'}; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 700; color: white; font-size: ${pkg.typeIcon ? '18px' : '14px'};">
+                                            ${pkg.typeIcon || (state.currentDeliveryIndex + idx + 2)}
+                                        </div>
+                                        <div style="flex: 1;">
+                                            <div style="display: flex; align-items: center; gap: 6px;">
+                                                <div style="font-size: 14px; font-weight: 600; color: white;">${pkg.address}</div>
+                                                ${pkg.type ? `<span style="font-size: 9px; background: rgba(255,255,255,0.3); padding: 2px 6px; border-radius: 4px; font-weight: 600;">${pkg.type}</span>` : ''}
+                                            </div>
+                                            <div style="font-size: 12px; color: rgba(255,255,255,0.8); margin-top: 2px;">${pkg.distance} km • ${pkg.duration} dk</div>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+
+            // Initialize mini map
+            setTimeout(() => initMiniMap(), 100);
+            
+            // Start pause timer if paused
+            if (state.isPaused && state.pauseStartTime) {
+                updatePauseTimer();
+            }
+        }
+
+        function renderComplete() {
+            const app = document.getElementById('mobileApp');
+            const routeInfo = state.routeInfo || { totalDistance: 0, totalDuration: 0 };
+            
+            app.innerHTML = `
+                <div class="loading-screen">
+                    <div style="font-size: 80px; margin-bottom: 20px;">🎉</div>
+                    <h2 style="font-size: 28px; margin-bottom: 10px;">Tebrikler!</h2>
+                    <p style="font-size: 16px; opacity: 0.9; margin-bottom: 30px;">
+                        Tüm teslimatları başarıyla tamamladınız!
+                    </p>
+                    <div style="background: rgba(255,255,255,0.2); padding: 20px; border-radius: 16px; margin-bottom: 20px;">
+                        <div style="font-size: 14px; opacity: 0.8; margin-bottom: 5px;">Toplam Performans Puanı</div>
+                        <div style="font-size: 48px; font-weight: 700;">⭐ ${state.performanceScore}</div>
+                    </div>
+                    <div style="background: rgba(255,255,255,0.2); padding: 15px; border-radius: 12px; font-size: 14px; text-align: left; margin-bottom: 20px;">
+                        <div style="margin-bottom: 8px;">✅ ${state.packages.length} Teslimat Tamamlandı</div>
+                        <div style="margin-bottom: 8px;">🚗 Toplam Mesafe: ${routeInfo.totalDistance} km</div>
+                        <div style="margin-bottom: 8px;">⏱️ Toplam Süre: ${routeInfo.totalDuration} dakika</div>
+                        <div>🎯 Başarı Oranı: %100</div>
+                    </div>
+                    <div style="background: rgba(255,255,255,0.15); padding: 15px; border-radius: 12px; border: 2px dashed rgba(255,255,255,0.3); text-align: center; margin-bottom: 20px;">
+                        <div style="font-size: 14px; opacity: 0.9; margin-bottom: 8px;">
+                            🏠 Depoya Dönüş Mesafesi
+                        </div>
+                        <div style="font-size: 24px; font-weight: 700;">
+                            ${state.packages[state.packages.length - 1]?.returnDistance || '0.0'} km
+                        </div>
+                    </div>
+                    <button class="btn-primary" onclick="returnToDepot()">
+                        🏠 Depoya Dön
+                    </button>
+                </div>
+            `;
+        }
+
+        // MOBILE APP FUNCTIONS (SÜRÜCÜ AKIŞI İŞLEVLERİ)
+// Bu bölüm; sürücünün gerçek kullanımdaki tüm akışını simüle eder:
+// - Barkod tarama (kamera veya manuel giriş)
+// - Paketleri hızlı ekleme
+// - AI ile rota optimizasyonu
+// - Navigasyonu açma, teslimi tamamlama
+// - Molaya / acil duruma geçme ve geri başlatma
+        function startPackageLoading() {
+            state.currentScreen = 'packageLoading';
+            renderMobileApp();
+        }
+
+        function scanBarcode() {
+            if (state.packages.length >= 20) {
+                showToast('⚠️ Limit', 'Maksimum 20 paket ekleyebilirsiniz');
+                return;
+            }
+            
+            // Show barcode scan modal
+            const modal = document.getElementById('pauseModal');
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width: 500px;">
+                    <div class="modal-title">Barkod Okut</div>
+                    <div style="margin-bottom: 20px;">
+                        <div style="display: grid; gap: 12px;">
+                            <button class="modal-btn modal-btn-break" onclick="openCamera()">
+                                📷 Kamera ile Okut
+                            </button>
+                            <button class="modal-btn modal-btn-break" onclick="manualBarcodeEntry()">
+                                ✏️ Manuel Giriş
+                            </button>
+                            <button class="modal-btn modal-btn-cancel" onclick="closeBarcodeModal()">
+                                İptal
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            modal.classList.add('active');
+        }
+        
+        function closeBarcodeModal() {
+            document.getElementById('pauseModal').classList.remove('active');
+            if (state.isScanningBarcode && typeof Quagga !== 'undefined') {
+                Quagga.stop();
+                state.isScanningBarcode = false;
+            }
+        }
+        
+        function openCamera() {
+            const modal = document.getElementById('pauseModal');
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width: 600px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <div class="modal-title" style="margin: 0;">Barkod Tarama</div>
+                        <button onclick="closeBarcodeModal()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666;">✕</button>
+                    </div>
+                    <div id="barcode-scanner" style="width: 100%; height: 300px; background: #000; border-radius: 12px; overflow: hidden; position: relative;">
+                        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; text-align: center;">
+                            <div style="font-size: 48px; margin-bottom: 10px;">📷</div>
+                            <div>Kamera başlatılıyor...</div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 15px; padding: 12px; background: #f3f4f6; border-radius: 8px; font-size: 13px; color: #666; text-align: center;">
+                        💡 Barkodu kameraya net bir şekilde gösterin
+                    </div>
+                </div>
+            `;
+            
+            // Start Quagga
+            setTimeout(() => {
+                if (typeof Quagga !== 'undefined') {
+                    state.isScanningBarcode = true;
+                    Quagga.init({
+                        inputStream: {
+                            name: "Live",
+                            type: "LiveStream",
+                            target: document.querySelector('#barcode-scanner'),
+                            constraints: {
+                                width: 640,
+                                height: 480,
+                                facingMode: "environment"
+                            }
+                        },
+                        decoder: {
+                            readers: ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader", "upc_reader"]
+                        }
+                    }, function(err) {
+                        if (err) {
+                            console.log(err);
+                            showToast('❌ Hata', 'Kamera erişimi reddedildi');
+                            closeBarcodeModal();
+                            return;
+                        }
+                        Quagga.start();
+                    });
+                    
+                    Quagga.onDetected(function(result) {
+                        const code = result.codeResult.code;
+                        Quagga.stop();
+                        state.isScanningBarcode = false;
+                        closeBarcodeModal();
+                        addPackageWithBarcode(code);
+                    });
+                } else {
+                    showToast('❌ Hata', 'Barkod okuyucu yüklenemedi');
+                    closeBarcodeModal();
+                }
+            }, 300);
+        }
+        
+        function manualBarcodeEntry() {
+            const modal = document.getElementById('pauseModal');
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <div class="modal-title">Manuel Barkod Girişi</div>
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: block; font-size: 12px; color: #666; margin-bottom: 8px; font-weight: 600;">
+                            BARKOD NUMARASI
+                        </label>
+                        <input type="text" id="manualBarcodeInput" placeholder="PKG12345" 
+                            style="width: 100%; padding: 14px; border: 2px solid #e5e7eb; border-radius: 12px; font-size: 16px; font-family: monospace; text-transform: uppercase;"
+                            onkeypress="if(event.key === 'Enter') submitManualBarcode()">
+                        <div style="font-size: 12px; color: #999; margin-top: 8px;">
+                            💡 Barkod numarasını yazın veya yapıştırın
+                        </div>
+                    </div>
+                    <div style="display: grid; gap: 10px;">
+                        <button class="modal-btn modal-btn-break" onclick="submitManualBarcode()">
+                            ✓ Ekle
+                        </button>
+                        <button class="modal-btn modal-btn-cancel" onclick="closeBarcodeModal()">
+                            İptal
+                        </button>
+                    </div>
+                </div>
+            `;
+            modal.classList.add('active');
+            
+            setTimeout(() => {
+                document.getElementById('manualBarcodeInput').focus();
+            }, 100);
+        }
+        
+        function submitManualBarcode() {
+            const input = document.getElementById('manualBarcodeInput');
+            const barcode = input.value.trim().toUpperCase();
+            
+            if (!barcode) {
+                showToast('⚠️ Uyarı', 'Lütfen barkod numarası girin');
+                return;
+            }
+            
+            closeBarcodeModal();
+            addPackageWithBarcode(barcode);
+        }
+        
+        function addPackageWithBarcode(barcode) {
+            if (state.packages.length >= 20) {
+                showToast('⚠️ Limit', 'Maksimum 20 paket ekleyebilirsiniz');
+                return;
+            }
+            
+            const packageTypes = [
+                { name: 'Standard', icon: '📦', color: '#3b82f6', priority: 2 },
+                { name: 'Express', icon: '⚡', color: '#ef4444', priority: 1 },
+                { name: 'Kırılabilir', icon: '🔶', color: '#f59e0b', priority: 3 },
+                { name: 'Nakit Tahsilat', icon: '💰', color: '#10b981', priority: 1 }
+            ];
+            
+            const randomType = packageTypes[Math.floor(Math.random() * packageTypes.length)];
+            
+            const addr = atasehirAddresses[state.packages.length];
+            const newPackage = {
+                id: state.packages.length + 1,
+                address: addr.name,
+                barcode: barcode,
+                lat: addr.lat,
+                lng: addr.lng,
+                distance: (Math.random() * 3 + 0.5).toFixed(1),
+                duration: Math.floor(Math.random() * 10 + 3),
+                phone: `0555 ${Math.floor(Math.random() * 900 + 100)} ${Math.floor(Math.random() * 90 + 10)} ${Math.floor(Math.random() * 90 + 10)}`,
+                smsCode: String(Math.floor(Math.random() * 9000) + 1000),
+                type: randomType.name,
+                typeIcon: randomType.icon,
+                typeColor: randomType.color,
+                priority: randomType.priority,
+                timeWindow: {
+                    start: `${9 + Math.floor(Math.random() * 6)}:00`,
+                    end: `${11 + Math.floor(Math.random() * 6)}:00`
+                }
+            };
+            
+            state.packages.push(newPackage);
+            showToast('✅ Paket Eklendi', `${randomType.icon} ${newPackage.address} - ${barcode}`);
+            renderMobileApp();
+        }
+
+        function quickAdd() {
+            const remaining = 20 - state.packages.length;
+            if (remaining === 0) {
+                showToast('⚠️ Limit', 'Maksimum 20 paket ekleyebilirsiniz');
+                return;
+            }
+            
+            const packageTypes = [
+                { name: 'Standard', icon: '📦', color: '#3b82f6', priority: 2 },
+                { name: 'Express', icon: '⚡', color: '#ef4444', priority: 1 },
+                { name: 'Kırılabilir', icon: '🔶', color: '#f59e0b', priority: 3 },
+                { name: 'Nakit Tahsilat', icon: '💰', color: '#10b981', priority: 1 }
+            ];
+            
+            const toAdd = Math.min(5, remaining);
+            
+            for (let i = 0; i < toAdd; i++) {
+                const randomType = packageTypes[Math.floor(Math.random() * packageTypes.length)];
+                const addr = atasehirAddresses[state.packages.length];
+                const newPackage = {
+                    id: state.packages.length + 1,
+                    address: addr.name,
+                    barcode: `PKG${String(Math.floor(Math.random() * 90000) + 10000)}`,
+                    lat: addr.lat,
+                    lng: addr.lng,
+                    distance: (Math.random() * 3 + 0.5).toFixed(1),
+                    duration: Math.floor(Math.random() * 10 + 3),
+                    phone: `0555 ${Math.floor(Math.random() * 900 + 100)} ${Math.floor(Math.random() * 90 + 10)} ${Math.floor(Math.random() * 90 + 10)}`,
+                    smsCode: String(Math.floor(Math.random() * 9000) + 1000),
+                    type: randomType.name,
+                    typeIcon: randomType.icon,
+                    typeColor: randomType.color,
+                    priority: randomType.priority,
+                    timeWindow: {
+                        start: `${9 + Math.floor(Math.random() * 6)}:00`,
+                        end: `${11 + Math.floor(Math.random() * 6)}:00`
+                    }
+                };
+                state.packages.push(newPackage);
+            }
+            
+            showToast('✅ Paketler Eklendi', `${toAdd} paket sisteme yüklendi`);
+            
+            renderMobileApp();
+        }
+
+        function optimizeRoute() {
+            state.currentScreen = 'optimization';
+            state.optimizationProgress = 0;
+            renderMobileApp();
+
+            const interval = setInterval(() => {
+                state.optimizationProgress += 2;
+                renderMobileApp();
+                
+                if (state.optimizationProgress >= 100) {
+                    clearInterval(interval);
+                    
+                    // *** GERÇEK OPTİMİZASYON BURAYA! ***
+                    const depot = [state.depot.lat, state.depot.lng];
+                    
+                    // Paketleri optimize et - EN YAKIN KOMŞU + 2-OPT
+                    const optimizedPackages = optimizePackageOrder(depot, state.packages);
+                    state.packages = optimizedPackages;
+                    
+                    setTimeout(() => {
+                        state.currentScreen = 'delivery';
+                        
+                        // Update vehicle total deliveries to match loaded packages
+                        if (state.currentUser) {
+                            const vehicleIndex = state.vehicles.findIndex(v => v.id === state.currentUser.id);
+                            if (vehicleIndex !== -1) {
+                                state.vehicles[vehicleIndex].totalDeliveries = state.packages.length;
+                            }
+                        } else {
+                            state.vehicles[0].totalDeliveries = state.packages.length;
+                        }
+                        
+                        renderMobileApp();
+                        updateAdminStats();
+                        
+                        // Show optimization badge on admin panel
+                        const badge = document.getElementById('optimizationBadge');
+                        if (badge) {
+                            badge.classList.add('show');
+                            setTimeout(() => badge.classList.remove('show'), 3000);
+                        }
+                        
+                        showToast('✅ Optimizasyon', `Rota optimize edildi! En yakın konumlara göre sıralandı.`);
+                    }, 500);
+                }
+            }, 60);
+        }
+        
+        // GERÇEK OPTİMİZASYON FONKSİYONU
+        function optimizePackageOrder(depotPos, packages) {
+            if (packages.length === 0) return packages;
+            
+            // 1. NEAREST NEIGHBOR - En yakın komşuyu önce ziyaret et
+            const unvisited = [...packages];
+            const optimizedRoute = [];
+            let currentPos = depotPos;
+            
+            while (unvisited.length > 0) {
+                // En yakın paketi bul
+                let nearestIdx = 0;
+                let nearestDist = distance(currentPos, [unvisited[0].lat, unvisited[0].lng]);
+                
+                for (let i = 1; i < unvisited.length; i++) {
+                    const dist = distance(currentPos, [unvisited[i].lat, unvisited[i].lng]);
+                    if (dist < nearestDist) {
+                        nearestDist = dist;
+                        nearestIdx = i;
+                    }
+                }
+                
+                // En yakın paketi al ve rota'ya ekle
+                const nearestPackage = unvisited.splice(nearestIdx, 1)[0];
+                optimizedRoute.push(nearestPackage);
+                currentPos = [nearestPackage.lat, nearestPackage.lng];
+            }
+            
+            // 2. 2-OPT İYİLEŞTİRME - Kesişen rotaları düzelt
+            const improved = twoOptImprovePackages(optimizedRoute, depotPos);
+            
+            // 3. ID'leri ve mesafeleri yeniden hesapla
+            let prevPos = depotPos;
+            let totalDistance = 0;
+            
+            improved.forEach((pkg, idx) => {
+                pkg.id = idx + 1;
+                // Gerçek mesafeyi hesapla (km)
+                const dist = distance(prevPos, [pkg.lat, pkg.lng]);
+                pkg.distance = dist.toFixed(1);
+                totalDistance += dist;
+                // Süreyi mesafeye göre hesapla (ortalama 40 km/h hız)
+                pkg.duration = Math.max(3, Math.ceil(dist / 40 * 60));
+                prevPos = [pkg.lat, pkg.lng];
+            });
+            
+            // 4. DEPOYA DÖNÜŞ MESAFESİ - Son paketten depoya
+            if (improved.length > 0) {
+                const lastPackage = improved[improved.length - 1];
+                const returnDistance = distance([lastPackage.lat, lastPackage.lng], depotPos);
+                totalDistance += returnDistance;
+                
+                // Son pakete dönüş bilgisini ekle
+                lastPackage.returnToDepot = true;
+                lastPackage.returnDistance = returnDistance.toFixed(1);
+            }
+            
+            // Toplam rota bilgisini state'e kaydet
+            state.routeInfo = {
+                totalDistance: totalDistance.toFixed(1),
+                totalDuration: Math.ceil(totalDistance / 40 * 60),
+                depotStart: true,
+                depotEnd: true
+            };
+            
+            return improved;
+        }
+        
+        function twoOptImprovePackages(packages, depotPos) {
+            if (packages.length < 4) return packages;
+            
+            let bestRoute = [...packages];
+            let improved = true;
+            let iteration = 0;
+            
+            while (improved && iteration < 50) {
+                improved = false;
+                iteration++;
+                
+                for (let i = 0; i < bestRoute.length - 2; i++) {
+                    for (let j = i + 2; j < bestRoute.length; j++) {
+                        // Mevcut mesafe
+                        const pos_i = i === 0 ? depotPos : [bestRoute[i-1].lat, bestRoute[i-1].lng];
+                        const currentDist = 
+                            distance(pos_i, [bestRoute[i].lat, bestRoute[i].lng]) +
+                            distance([bestRoute[i].lat, bestRoute[i].lng], [bestRoute[i+1].lat, bestRoute[i+1].lng]) +
+                            distance([bestRoute[j-1].lat, bestRoute[j-1].lng], [bestRoute[j].lat, bestRoute[j].lng]);
+                        
+                        // Ters çevrilmiş mesafe
+                        const newDist = 
+                            distance(pos_i, [bestRoute[j].lat, bestRoute[j].lng]) +
+                            distance([bestRoute[j].lat, bestRoute[j].lng], [bestRoute[j-1].lat, bestRoute[j-1].lng]) +
+                            distance([bestRoute[i+1].lat, bestRoute[i+1].lng], [bestRoute[i].lat, bestRoute[i].lng]);
+                        
+                        // Daha kısa mı?
+                        if (newDist < currentDist - 0.01) { // 0.01 km = 10 metre tolerance
+                            // Segment'i ters çevir
+                            const newRoute = [
+                                ...bestRoute.slice(0, i),
+                                ...bestRoute.slice(i, j + 1).reverse(),
+                                ...bestRoute.slice(j + 1)
+                            ];
+                            bestRoute = newRoute;
+                            improved = true;
+                        }
+                    }
+                }
+            }
+            
+            return bestRoute;
+        }
+
+        function openGoogleMaps(lat, lng) {
+            const url = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+            window.open(url, '_blank');
+        }
+
+        function callCustomer(phone) {
+            showToast('📞 Arama', `${phone} aranıyor...`);
+        }
+
+        function deliverPackage() {
+            const currentPkg = state.packages[state.currentDeliveryIndex];
+            showPODModal(currentPkg);
+        }
+        
+        // POD Modal - Fotoğraf ve İmza
+        function showPODModal(pkg) {
+            const modal = document.getElementById('smsModal');
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width: 500px;">
+                    <div class="modal-title">📦 Teslimat Kanıtı</div>
+                    <div style="color: #666; font-size: 14px; margin-bottom: 20px;">
+                        ${pkg.address}
+                    </div>
+                    
+                    <div id="podSteps">
+                        <!-- Step 1: Fotoğraf -->
+                        <div id="photoStep" style="text-align: center;">
+                            <div style="font-size: 64px; margin: 20px 0;">📸</div>
+                            <div style="font-size: 18px; font-weight: 600; margin-bottom: 10px;">Teslimat Fotoğrafı</div>
+                            <div style="color: #666; font-size: 14px; margin-bottom: 20px;">Paketi teslim ettiğiniz yerin fotoğrafını çekin</div>
+                            
+                            <video id="podVideo" style="width: 100%; max-height: 300px; border-radius: 12px; display: none; background: #000;"></video>
+                            <canvas id="podCanvas" style="display: none;"></canvas>
+                            <img id="podPreview" style="width: 100%; max-height: 300px; border-radius: 12px; display: none; margin-bottom: 15px;" />
+                            
+                            <div class="modal-buttons">
+                                <button onclick="startCamera()" id="startCameraBtn" class="modal-btn modal-btn-primary">
+                                    📷 Fotoğraf Çek
+                                </button>
+                                <button onclick="skipPhoto()" class="modal-btn modal-btn-secondary">
+                                    ⏩ Atla
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Step 2: İmza -->
+                        <div id="signatureStep" style="display: none; text-align: center;">
+                            <div style="font-size: 64px; margin: 20px 0;">✍️</div>
+                            <div style="font-size: 18px; font-weight: 600; margin-bottom: 10px;">Müşteri İmzası</div>
+                            <div style="color: #666; font-size: 14px; margin-bottom: 20px;">Müşteriden imza alın</div>
+                            
+                            <canvas id="signatureCanvas" width="400" height="200" style="border: 2px dashed #ddd; border-radius: 12px; background: white; cursor: crosshair; touch-action: none;"></canvas>
+                            
+                            <div class="modal-buttons" style="margin-top: 20px;">
+                                <button onclick="clearSignature()" class="modal-btn modal-btn-secondary">
+                                    🗑️ Temizle
+                                </button>
+                                <button onclick="saveSignature()" class="modal-btn modal-btn-primary">
+                                    ✓ İmzayı Onayla
+                                </button>
+                                <button onclick="skipSignature()" class="modal-btn modal-btn-secondary">
+                                    ⏩ Atla
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Step 3: SMS -->
+                        <div id="smsStep" style="display: none;">
+                            <div style="text-align: center; margin-bottom: 20px;">
+                                <div style="font-size: 64px; margin-bottom: 15px;">📱</div>
+                                <div style="font-size: 18px; font-weight: 600; margin-bottom: 10px;">SMS Doğrulama</div>
+                                <div style="color: #666; font-size: 14px;">
+                                    ${pkg.phone} numarasına kod gönderildi
+                                </div>
+                            </div>
+                            <input type="text" id="smsCodeInput" placeholder="4 haneli kod" maxlength="4" 
+                                style="width: 100%; padding: 15px; border: 2px solid #ddd; border-radius: 12px; 
+                                font-size: 24px; text-align: center; letter-spacing: 10px; margin-bottom: 20px;" />
+                            <div class="modal-buttons">
+                                <button onclick="closePODModal()" class="modal-btn modal-btn-secondary">İptal</button>
+                                <button onclick="verifyAndComplete()" class="modal-btn modal-btn-primary">Teslim Et</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            modal.classList.add('active');
+            
+            // Otomatik SMS kodu
+            setTimeout(() => {
+                const input = document.getElementById('smsCodeInput');
+                if (input) {
+                    const code = '1234';
+                    showToast('📱 SMS Kodu', `Doğrulama kodu: ${code}`);
+                }
+            }, 1000);
+        }
+        
+        let mediaStream = null;
+        let podData = {
+            photo: null,
+            signature: null,
+            timestamp: null,
+            location: null
+        };
+        
+        function startCamera() {
+            const video = document.getElementById('podVideo');
+            const btn = document.getElementById('startCameraBtn');
+            
+            video.style.display = 'block';
+            btn.innerHTML = '📸 Çek';
+            btn.onclick = capturePhoto;
+            
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+                .then(stream => {
+                    mediaStream = stream;
+                    video.srcObject = stream;
+                    video.play();
+                })
+                .catch(err => {
+                    console.log('Kamera erişim hatası, simüle ediliyor...');
+                    simulatePhoto();
+                });
+        }
+        
+        function capturePhoto() {
+            const video = document.getElementById('podVideo');
+            const canvas = document.getElementById('podCanvas');
+            const preview = document.getElementById('podPreview');
+            const ctx = canvas.getContext('2d');
+            
+            canvas.width = video.videoWidth || 640;
+            canvas.height = video.videoHeight || 480;
+            
+            ctx.drawImage(video, 0, 0);
+            podData.photo = canvas.toDataURL('image/jpeg', 0.8);
+            
+            preview.src = podData.photo;
+            preview.style.display = 'block';
+            video.style.display = 'none';
+            
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+            }
+            
+            document.getElementById('startCameraBtn').innerHTML = '✓ Fotoğraf Çekildi';
+            document.getElementById('startCameraBtn').disabled = true;
+            document.getElementById('startCameraBtn').style.opacity = '0.5';
+            
+            setTimeout(goToSignatureStep, 1000);
+        }
+        
+        function simulatePhoto() {
+            const canvas = document.getElementById('podCanvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = 640;
+            canvas.height = 480;
+            
+            ctx.fillStyle = '#667eea';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.font = '48px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('📦', canvas.width/2, canvas.height/2);
+            ctx.font = '24px Arial';
+            ctx.fillText('Teslimat Fotoğrafı', canvas.width/2, canvas.height/2 + 50);
+            
+            podData.photo = canvas.toDataURL('image/jpeg', 0.8);
+            
+            const preview = document.getElementById('podPreview');
+            preview.src = podData.photo;
+            preview.style.display = 'block';
+            
+            showToast('✓ Fotoğraf', 'Simüle fotoğraf oluşturuldu');
+            setTimeout(goToSignatureStep, 1000);
+        }
+        
+        function skipPhoto() {
+            goToSignatureStep();
+        }
+        
+        function goToSignatureStep() {
+            document.getElementById('photoStep').style.display = 'none';
+            document.getElementById('signatureStep').style.display = 'block';
+            initSignaturePad();
+        }
+        
+        let isDrawing = false;
+        let signatureCanvas, signatureCtx;
+        
+        function initSignaturePad() {
+            signatureCanvas = document.getElementById('signatureCanvas');
+            signatureCtx = signatureCanvas.getContext('2d');
+            
+            signatureCtx.strokeStyle = '#000';
+            signatureCtx.lineWidth = 2;
+            signatureCtx.lineCap = 'round';
+            
+            // Mouse events
+            signatureCanvas.addEventListener('mousedown', startDrawing);
+            signatureCanvas.addEventListener('mousemove', draw);
+            signatureCanvas.addEventListener('mouseup', stopDrawing);
+            signatureCanvas.addEventListener('mouseout', stopDrawing);
+            
+            // Touch events
+            signatureCanvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                const touch = e.touches[0];
+                const rect = signatureCanvas.getBoundingClientRect();
+                signatureCtx.beginPath();
+                signatureCtx.moveTo(touch.clientX - rect.left, touch.clientY - rect.top);
+                isDrawing = true;
+            });
+            
+            signatureCanvas.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if (!isDrawing) return;
+                const touch = e.touches[0];
+                const rect = signatureCanvas.getBoundingClientRect();
+                signatureCtx.lineTo(touch.clientX - rect.left, touch.clientY - rect.top);
+                signatureCtx.stroke();
+            });
+            
+            signatureCanvas.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                stopDrawing();
+            });
+        }
+        
+        function startDrawing(e) {
+            isDrawing = true;
+            const rect = signatureCanvas.getBoundingClientRect();
+            signatureCtx.beginPath();
+            signatureCtx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+        }
+        
+        function draw(e) {
+            if (!isDrawing) return;
+            const rect = signatureCanvas.getBoundingClientRect();
+            signatureCtx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+            signatureCtx.stroke();
+        }
+        
+        function stopDrawing() {
+            isDrawing = false;
+        }
+        
+        function clearSignature() {
+            signatureCtx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+        }
+        
+        function saveSignature() {
+            podData.signature = signatureCanvas.toDataURL('image/png');
+            showToast('✓ İmza', 'İmza kaydedildi');
+            goToSMSStep();
+        }
+        
+        function skipSignature() {
+            goToSMSStep();
+        }
+        
+        function goToSMSStep() {
+            document.getElementById('signatureStep').style.display = 'none';
+            document.getElementById('smsStep').style.display = 'block';
+            document.getElementById('smsCodeInput').focus();
+        }
+        
+        function verifyAndComplete() {
+            const code = document.getElementById('smsCodeInput').value;
+            if (code !== '1234') {
+                showToast('❌ Hata', 'Yanlış kod!');
+                return;
+            }
+            
+            // POD verisini kaydet
+            podData.timestamp = new Date().toISOString();
+            podData.location = state.packages[state.currentDeliveryIndex];
+            
+            const currentPkg = state.packages[state.currentDeliveryIndex];
+            if (!currentPkg.pods) currentPkg.pods = [];
+            currentPkg.pods.push({...podData});
+            
+            // Teslimatı tamamla
+            completeDelivery();
+            closePODModal();
+        }
+        
+        function closePODModal() {
+            document.getElementById('smsModal').classList.remove('active');
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+            }
+            podData = { photo: null, signature: null, timestamp: null, location: null };
+        }
+
+        function togglePause() {
+            if (state.isPaused) {
+                // Resume
+                const duration = Math.floor((Date.now() - state.pauseStartTime) / 1000);
+                const minutes = Math.floor(duration / 60);
+                const seconds = duration % 60;
+                
+                showToast(
+                    state.pauseType === 'break' ? '☕ Mola' : '🚨 Duraklatma',
+                    `${state.pauseType === 'break' ? 'Mola' : 'Duraklatma'} süresi: ${minutes}dk ${seconds}sn`
+                );
+                
+                state.isPaused = false;
+                state.pauseType = null;
+                state.pauseStartTime = null;
+                
+                // Clear interval
+                if (state.pauseTimerInterval) {
+                    clearInterval(state.pauseTimerInterval);
+                    state.pauseTimerInterval = null;
+                }
+                
+                // Update admin - sync vehicle
+                if (state.currentUser) {
+                    const vehicle = state.vehicles.find(v => v.id === state.currentUser.id);
+                    if (vehicle) {
+                        vehicle.status = 'active';
+                        vehicle.isPaused = false;
+                        vehicle.pauseType = null;
+                        vehicle.pauseStartTime = null;
+                    }
+                }
+                
+                // Send notification to admin
+                addNotification(
+                    'break',
+                    state.currentUser.name,
+                    state.pauseType === 'break' ? 'Mola sona erdi' : 'Duraklatma sona erdi'
+                );
+                
+                updateAdminVehicles();
+                renderMobileApp();
+            } else {
+                // Pause
+                showPauseModal();
+            }
+        }
+
+        function showPauseModal() {
+            const modal = document.getElementById('pauseModal');
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <div class="modal-title">Duraklatma Sebebi</div>
+                    <div class="modal-buttons">
+                        <button class="modal-btn modal-btn-break" onclick="setPause('break')">
+                            ☕ Mola Ver
+                        </button>
+                        <button class="modal-btn modal-btn-emergency" onclick="setPause('emergency')">
+                            🚨 Kaza Bildir
+                        </button>
+                        <button class="modal-btn modal-btn-cancel" onclick="closePauseModal()">
+                            İptal
+                        </button>
+                    </div>
+                </div>
+            `;
+            modal.classList.add('active');
+        }
+
+        function closePauseModal() {
+            document.getElementById('pauseModal').classList.remove('active');
+        }
+
+        function setPause(type) {
+            state.isPaused = true;
+            state.pauseType = type;
+            state.pauseStartTime = Date.now();
+            
+            // Update vehicle in admin
+            if (state.currentUser) {
+                const vehicle = state.vehicles.find(v => v.id === state.currentUser.id);
+                if (vehicle) {
+                    vehicle.status = type === 'break' ? 'break' : 'emergency';
+                    vehicle.isPaused = true;
+                    vehicle.pauseType = type;
+                    vehicle.pauseStartTime = Date.now();
+                }
+            }
+            
+            closePauseModal();
+            renderMobileApp();
+            
+            // Start timer
+            startPauseTimer();
+            
+            // Send notification to admin
+            addNotification(
+                type === 'break' ? 'break' : 'emergency',
+                state.currentUser.name,
+                type === 'break' ? 'Mola başladı' : 'Kaza bildirimi'
+            );
+            
+            updateAdminVehicles();
+        }
+        
+        function startPauseTimer() {
+            // Clear existing interval
+            if (state.pauseTimerInterval) {
+                clearInterval(state.pauseTimerInterval);
+            }
+            
+            // Start new interval
+            state.pauseTimerInterval = setInterval(() => {
+                updatePauseTimer();
+                updateAdminPauseTimers();
+            }, 1000);
+        }
+
+        function updatePauseTimer() {
+            if (!state.isPaused || !state.pauseStartTime) return;
+            
+            const duration = Math.floor((Date.now() - state.pauseStartTime) / 1000);
+            const minutes = Math.floor(duration / 60);
+            const seconds = duration % 60;
+            
+            const timerEl = document.getElementById('pauseTimer');
+            if (timerEl) {
+                timerEl.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+            }
+        }
+        
+        function updateAdminPauseTimers() {
+            // Update all vehicle timers in admin panel
+            state.vehicles.forEach(vehicle => {
+                if (vehicle.isPaused && vehicle.pauseStartTime) {
+                    const duration = Math.floor((Date.now() - vehicle.pauseStartTime) / 1000);
+                    const minutes = Math.floor(duration / 60);
+                    const seconds = duration % 60;
+                    
+                    const timerEl = document.getElementById(`admin-timer-${vehicle.id}`);
+                    if (timerEl) {
+                        timerEl.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+                    }
+                }
+            });
+            
+            // Update selected vehicle overlay if open
+            if (state.selectedVehicle && state.selectedVehicle.isPaused && state.selectedVehicle.pauseStartTime) {
+                const duration = Math.floor((Date.now() - state.selectedVehicle.pauseStartTime) / 1000);
+                const minutes = Math.floor(duration / 60);
+                const seconds = duration % 60;
+                
+                const overlayTimerEl = document.getElementById('overlay-pause-timer');
+                if (overlayTimerEl) {
+                    overlayTimerEl.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+                }
+            }
+        }
+
+        
+        function closeSMSModal() {
+            document.getElementById('smsModal').classList.remove('active');
+        }
+
+        function verifySMS(correctCode) {
+            const input = document.getElementById('smsInput').value;
+            
+            if (input === correctCode) {
+                closeSMSModal();
+                completeDelivery();
+            } else {
+                showToast('❌ Hata', 'Kod hatalı, lütfen tekrar deneyin');
+            }
+        }
+
+        function completeDelivery() {
+            // Add points
+            const points = Math.floor(Math.random() * 3) + 5; // 5-7 points
+            state.performanceScore += points;
+            
+            // Show point popup
+            showPointPopup(points);
+            
+            // Get current package location
+            const currentPkg = state.packages[state.currentDeliveryIndex];
+            
+            // Update delivery index
+            state.currentDeliveryIndex++;
+            
+            // Update driver position to delivered package location
+            if (state.currentUser) {
+                const vehicleIndex = state.vehicles.findIndex(v => v.id === state.currentUser.id);
+                if (vehicleIndex !== -1) {
+                    // Move driver to package location
+                    state.vehicles[vehicleIndex].position = [currentPkg.lat, currentPkg.lng];
+                    state.vehicles[vehicleIndex].completedDeliveries++;
+                }
+            } else {
+                // Fallback
+                state.vehicles[0].position = [currentPkg.lat, currentPkg.lng];
+                state.vehicles[0].completedDeliveries++;
+            }
+            
+            // Send notification to admin
+            const driverName = state.currentUser ? state.currentUser.name : 'Ahmet Yılmaz';
+            addNotification(
+                'delivery',
+                driverName,
+                `Teslimat #${state.currentDeliveryIndex} tamamlandı`
+            );
+            
+            updateAdminStats();
+            updateAdminVehicles();
+            
+            // Check if all deliveries complete
+            if (state.currentDeliveryIndex >= state.packages.length) {
+                setTimeout(() => {
+                    state.currentScreen = 'complete';
+                    renderMobileApp();
+                }, 2000);
+            } else {
+                setTimeout(() => {
+                    renderMobileApp();
+                }, 2000);
+            }
+        }
+
+        function showPointPopup(points) {
+            const popup = document.getElementById('pointPopup');
+            popup.innerHTML = `
+                <div class="point-popup-icon">🎉</div>
+                <div class="point-popup-title">Harika Teslimat!</div>
+                <div class="point-popup-points">+${points} Performans Puanı</div>
+            `;
+            popup.classList.add('show');
+            
+            setTimeout(() => {
+                popup.classList.remove('show');
+            }, 2000);
+        }
+
+        function returnToDepot() {
+            const depotLat = 40.9867;
+            const depotLng = 29.1259;
+            const url = `https://www.google.com/maps/dir/?api=1&destination=${depotLat},${depotLng}`;
+            window.open(url, '_blank');
+            
+            showToast('🏠 Depoya Dönüş', 'Navigasyon başlatıldı');
+        }
+
+        // MINI MAP
+        function initMiniMap() {
+            const mapContainer = document.getElementById('miniMap');
+            if (!mapContainer || state.miniMap) return;
+            
+            const currentPkg = state.packages[state.currentDeliveryIndex];
+            
+            state.miniMap = L.map('miniMap', {
+                zoomControl: false,
+                attributionControl: false
+            }).setView([currentPkg.lat, currentPkg.lng], 14);
+            
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(state.miniMap);
+            
+            // Add marker
+            const icon = L.divIcon({
+                html: '<div style="background: #ef4444; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white;"></div>',
+                className: '',
+                iconSize: [20, 20]
+            });
+            
+            L.marker([currentPkg.lat, currentPkg.lng], { icon }).addTo(state.miniMap);
+        }
+
+        // ADMIN PANEL (YÖNETİCİ HARİTA VE KONTROL EKRANI)
+// Bu bölüm; yöneticinin harita üzerinden tüm araçları izlemesini sağlar.
+// - Araç marker’ları, rota çizimleri, duraklama ve acil durum işaretleri
+// - Canlı bildirim paneli ve performans göstergeleri
+// - Rapor & istatistik paneli ile tasarruf ve SLA görünümü
+        function initAdminMap() {
+            state.adminMap = L.map('adminMap').setView([40.9867, 29.1259], 13);
+            
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: ''
+            }).addTo(state.adminMap);
+            
+            // Add vehicles
+            updateAdminVehicles();
+            
+            // Show optimization badge after 2 seconds
+            setTimeout(() => {
+                const badge = document.getElementById('optimizationBadge');
+                badge.classList.add('show');
+                setTimeout(() => badge.classList.remove('show'), 3000);
+            }, 2000);
+        }
+
+        function updateAdminVehicles() {
+            if (!state.adminMap) return;
+            
+            // Clear existing markers
+            state.adminMap.eachLayer(layer => {
+                if (layer instanceof L.Marker) {
+                    state.adminMap.removeLayer(layer);
+                }
+            });
+            
+            // Add vehicle markers
+            state.vehicles.forEach(vehicle => {
+                let timerHtml = '';
+                if (vehicle.isPaused && vehicle.pauseStartTime) {
+                    const duration = Math.floor((Date.now() - vehicle.pauseStartTime) / 1000);
+                    const minutes = Math.floor(duration / 60);
+                    const seconds = duration % 60;
+                    const timerText = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+                    
+                    timerHtml = `
+                        <div style="
+                            position: absolute;
+                            top: -25px;
+                            left: 50%;
+                            transform: translateX(-50%);
+                            background: ${vehicle.pauseType === 'emergency' ? '#dc2626' : '#f59e0b'};
+                            color: white;
+                            padding: 4px 8px;
+                            border-radius: 8px;
+                            font-size: 11px;
+                            font-weight: 700;
+                            white-space: nowrap;
+                            font-family: monospace;
+                            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+                        " id="admin-timer-${vehicle.id}">${timerText}</div>
+                    `;
+                }
+                
+                const icon = L.divIcon({
+                    html: `
+                        <div style="position: relative;">
+                            ${timerHtml}
+                            <div class="vehicle-marker ${vehicle.color} ${vehicle.status === 'emergency' ? 'emergency-marker' : ''}">
+                                🚚
+                            </div>
+                        </div>
+                    `,
+                    className: '',
+                    iconSize: [40, 40]
+                });
+                
+                const marker = L.marker(vehicle.position, { icon }).addTo(state.adminMap);
+                
+                marker.on('click', () => showVehicleOverlay(vehicle));
+            });
+            
+            // Draw route for selected vehicle
+            if (state.selectedVehicle) {
+                drawVehicleRoute(state.selectedVehicle);
+            }
+        }
+
+        async function drawVehicleRoute(vehicle) {
+            // Remove existing route
+            state.adminMap.eachLayer(layer => {
+                if (layer instanceof L.Polyline) {
+                    state.adminMap.removeLayer(layer);
+                }
+            });
+            
+            // Generate route points
+            const routePoints = generateRoutePoints(vehicle);
+            
+            // Try OSRM API (silently fail if unavailable)
+            try {
+                const coords = routePoints.map(p => `${p[1]},${p[0]}`).join(';');
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+                
+                const response = await fetch(`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`, {
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                
+                const data = await response.json();
+                
+                if (data.code === 'Ok' && data.routes && data.routes[0]) {
+                    // Use real road geometry
+                    const realRoute = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+                    
+                    // Draw route
+                    const colors = { blue: '#3b82f6', green: '#10b981', orange: '#f59e0b' };
+                    L.polyline(realRoute, {
+                        color: colors[vehicle.color],
+                        weight: 4,
+                        opacity: 0.7
+                    }).addTo(state.adminMap);
+                } else {
+                    drawStraightRoute(vehicle, routePoints);
+                }
+            } catch (error) {
+                // Silently use fallback - no console spam
+                drawStraightRoute(vehicle, routePoints);
+            }
+            
+            // Add delivery markers
+            const colors = { blue: '#3b82f6', green: '#10b981', orange: '#f59e0b' };
+            routePoints.forEach((point, idx) => {
+                // Depo işareti (ilk ve son)
+                if (idx === 0) {
+                    const depotIcon = L.divIcon({
+                        html: `
+                            <div style="
+                                background: linear-gradient(135deg, #667eea, #764ba2);
+                                width: 32px;
+                                height: 32px;
+                                border-radius: 50%;
+                                border: 4px solid white;
+                                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                font-size: 16px;
+                            ">🏠</div>
+                        `,
+                        className: '',
+                        iconSize: [32, 32]
+                    });
+                    L.marker(point, { icon: depotIcon }).addTo(state.adminMap)
+                        .bindPopup(`<b>🏠 ${state.depot.name}</b><br>${state.depot.address}`);
+                    return;
+                }
+                
+                // Son nokta da depo
+                if (idx === routePoints.length - 1) {
+                    return; // Zaten ilk depo işareti gösteriliyor
+                }
+                
+                const isCompleted = idx <= vehicle.completedDeliveries;
+                const icon = L.divIcon({
+                    html: `
+                        <div style="
+                            background: ${isCompleted ? colors[vehicle.color] : 'white'};
+                            width: 24px;
+                            height: 24px;
+                            border-radius: 50%;
+                            border: 3px solid ${colors[vehicle.color]};
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            font-size: 12px;
+                            font-weight: 700;
+                            color: ${isCompleted ? 'white' : colors[vehicle.color]};
+                        ">${idx}</div>
+                    `,
+                    className: '',
+                    iconSize: [24, 24]
+                });
+                
+                L.marker(point, { icon }).addTo(state.adminMap);
+            });
+        }
+        
+        function drawStraightRoute(vehicle, routePoints) {
+            const colors = { blue: '#3b82f6', green: '#10b981', orange: '#f59e0b' };
+            L.polyline(routePoints, {
+                color: colors[vehicle.color],
+                weight: 4,
+                opacity: 0.7,
+                dashArray: '5, 10'
+            }).addTo(state.adminMap);
+        }
+
+        function generateRoutePoints(vehicle) {
+            // Depodan başla
+            const depotPos = [state.depot.lat, state.depot.lng];
+            const points = [depotPos];
+            
+            // CRITICAL: Use actual package addresses if this is the logged-in user
+            if (state.currentUser && vehicle.id === state.currentUser.id && state.packages.length > 0) {
+                // Use the EXACT addresses from loaded packages
+                state.packages.forEach(pkg => {
+                    points.push([pkg.lat, pkg.lng]);
+                });
+                // Depoya dön
+                points.push(depotPos);
+                return points;
+            }
+            
+            // For other vehicles (demo purposes only)
+            let packageCount = vehicle.totalDeliveries || 10;
+            
+            const selectedAddresses = [];
+            const usedIndices = new Set();
+            
+            while (selectedAddresses.length < packageCount && usedIndices.size < atasehirAddresses.length) {
+                const randomIndex = Math.floor(Math.random() * atasehirAddresses.length);
+                if (!usedIndices.has(randomIndex)) {
+                    usedIndices.add(randomIndex);
+                    selectedAddresses.push(atasehirAddresses[randomIndex]);
+                }
+            }
+            
+            // Optimize route order using nearest neighbor + 2-opt
+            const optimizedOrder = optimizeRouteOrder(depotPos, selectedAddresses);
+            
+            optimizedOrder.forEach(addr => {
+                points.push([addr.lat, addr.lng]);
+            });
+            
+            // Depoya dön
+            points.push(depotPos);
+            
+            return points;
+        }
+        
+        function optimizeRouteOrder(startPos, addresses) {
+            // Nearest Neighbor Algorithm
+            const unvisited = [...addresses];
+            const route = [];
+            let current = startPos;
+            
+            while (unvisited.length > 0) {
+                let nearestIdx = 0;
+                let nearestDist = distance(current, [unvisited[0].lat, unvisited[0].lng]);
+                
+                for (let i = 1; i < unvisited.length; i++) {
+                    const dist = distance(current, [unvisited[i].lat, unvisited[i].lng]);
+                    if (dist < nearestDist) {
+                        nearestDist = dist;
+                        nearestIdx = i;
+                    }
+                }
+                
+                const nearest = unvisited.splice(nearestIdx, 1)[0];
+                route.push(nearest);
+                current = [nearest.lat, nearest.lng];
+            }
+            
+            // Apply 2-opt improvement
+            return twoOptImprove(route);
+        }
+        
+        function twoOptImprove(route) {
+            if (route.length < 4) return route;
+            
+            let improved = true;
+            let bestRoute = [...route];
+            
+            // Run 2-opt for max 50 iterations
+            for (let iteration = 0; iteration < 50 && improved; iteration++) {
+                improved = false;
+                
+                for (let i = 0; i < bestRoute.length - 2; i++) {
+                    for (let j = i + 2; j < bestRoute.length; j++) {
+                        // Calculate current distance
+                        const currentDist = 
+                            distance([bestRoute[i].lat, bestRoute[i].lng], [bestRoute[i+1].lat, bestRoute[i+1].lng]) +
+                            distance([bestRoute[j].lat, bestRoute[j].lng], [bestRoute[(j+1) % bestRoute.length].lat, bestRoute[(j+1) % bestRoute.length].lng]);
+                        
+                        // Calculate new distance after swap
+                        const newDist = 
+                            distance([bestRoute[i].lat, bestRoute[i].lng], [bestRoute[j].lat, bestRoute[j].lng]) +
+                            distance([bestRoute[i+1].lat, bestRoute[i+1].lng], [bestRoute[(j+1) % bestRoute.length].lat, bestRoute[(j+1) % bestRoute.length].lng]);
+                        
+                        if (newDist < currentDist) {
+                            // Reverse segment
+                            const newRoute = [
+                                ...bestRoute.slice(0, i + 1),
+                                ...bestRoute.slice(i + 1, j + 1).reverse(),
+                                ...bestRoute.slice(j + 1)
+                            ];
+                            bestRoute = newRoute;
+                            improved = true;
+                        }
+                    }
+                }
+            }
+            
+            return bestRoute;
+        }
+        
+        function distance(point1, point2) {
+            const lat1 = point1[0];
+            const lng1 = point1[1];
+            const lat2 = point2[0];
+            const lng2 = point2[1];
+            
+            // Haversine formula
+            const R = 6371; // Earth radius in km
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLng = (lng2 - lng1) * Math.PI / 180;
+            const a = 
+                Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLng / 2) * Math.sin(dLng / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c;
+        }
+
+        function showVehicleOverlay(vehicle) {
+            state.selectedVehicle = vehicle;
+            const overlay = document.getElementById('vehicleOverlay');
+            
+            let pauseInfo = '';
+            if (vehicle.isPaused && vehicle.pauseStartTime) {
+                const duration = Math.floor((Date.now() - vehicle.pauseStartTime) / 1000);
+                const minutes = Math.floor(duration / 60);
+                const seconds = duration % 60;
+                const timerText = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+                
+                if (vehicle.pauseType === 'break') {
+                    pauseInfo = `
+                        <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                            <div style="display: flex; align-items: center; gap: 12px;">
+                                <div style="font-size: 28px;">☕</div>
+                                <div style="flex: 1;">
+                                    <div style="font-weight: 700; color: #92400e; margin-bottom: 4px;">MOLA DEVAM EDİYOR</div>
+                                    <div style="font-size: 24px; font-weight: 700; color: #f59e0b; font-family: monospace;" id="overlay-pause-timer">${timerText}</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } else if (vehicle.pauseType === 'emergency') {
+                    pauseInfo = `
+                        <div style="background: #fee2e2; border-left: 4px solid #dc2626; padding: 15px; border-radius: 8px; margin-bottom: 15px; animation: emergencyBlink 1s infinite;">
+                            <div style="display: flex; align-items: center; gap: 12px;">
+                                <div style="font-size: 28px;">🚨</div>
+                                <div style="flex: 1;">
+                                    <div style="font-weight: 700; color: #991b1b; margin-bottom: 4px;">KAZA BİLDİRİMİ</div>
+                                    <div style="font-size: 24px; font-weight: 700; color: #dc2626; font-family: monospace;" id="overlay-pause-timer">${timerText}</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+            
+            overlay.innerHTML = `
+                <div class="vehicle-header">
+                    <div class="vehicle-name">${vehicle.name}</div>
+                    <div class="close-overlay" onclick="closeVehicleOverlay()">✕</div>
+                </div>
+                ${pauseInfo}
+                <div class="vehicle-info-grid">
+                    <div class="info-item">
+                        <div class="info-label">Teslimat</div>
+                        <div class="info-value">${vehicle.completedDeliveries}/${vehicle.totalDeliveries}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Tur Başlangıcı</div>
+                        <div class="info-value">${vehicle.startTime}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Tahmini Bitiş</div>
+                        <div class="info-value">${vehicle.estimatedEnd}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Ort. Hız</div>
+                        <div class="info-value">${vehicle.avgSpeed} km/s</div>
+                    </div>
+                </div>
+                <div class="optimization-box">
+                    <div class="optimization-header">
+                        <div class="optimization-title">🎯 OPTİMİZASYON</div>
+                        <div class="optimization-percent">↓${vehicle.savings}%</div>
+                    </div>
+                    <div class="optimization-details">
+                        Normal: ${(45.2 / (1 - vehicle.savings/100)).toFixed(1)} km • 
+                        Optimize: 45.2 km
+                    </div>
+                </div>
+                ${vehicle.completedDeliveries > 0 ? `
+                    <button onclick="showPODHistory('${vehicle.id}')" style="
+                        width: 100%;
+                        padding: 15px;
+                        margin-top: 15px;
+                        background: linear-gradient(135deg, #667eea, #764ba2);
+                        color: white;
+                        border: none;
+                        border-radius: 12px;
+                        font-weight: 600;
+                        cursor: pointer;
+                        font-size: 15px;
+                    ">
+                        📸 Teslimat Kanıtları (${vehicle.completedDeliveries})
+                    </button>
+                ` : ''}
+            `;
+            
+            overlay.classList.add('active');
+            drawVehicleRoute(vehicle);
+        }
+
+        function closeVehicleOverlay() {
+            document.getElementById('vehicleOverlay').classList.remove('active');
+            state.selectedVehicle = null;
+            
+            // Clear route
+            state.adminMap.eachLayer(layer => {
+                if (layer instanceof L.Polyline) {
+                    state.adminMap.removeLayer(layer);
+                }
+            });
+            
+            updateAdminVehicles();
+        }
+
+        function updateAdminStats() {
+            document.getElementById('totalPackages').textContent = state.vehicles.reduce((sum, v) => sum + v.totalDeliveries, 0);
+            document.getElementById('completedPackages').textContent = state.vehicles.reduce((sum, v) => sum + v.completedDeliveries, 0);
+        }
+
+        // NOTIFICATIONS
+        function addNotification(type, driver, message) {
+            const notification = {
+                type,
+                driver,
+                message,
+                time: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
+            };
+            
+            state.notifications.unshift(notification);
+            updateNotificationBadge();
+            showToastNotification(notification);
+            updateNotificationPanel();
+        }
+
+        function updateNotificationBadge() {
+            const badge = document.getElementById('notificationBadge');
+            badge.textContent = state.notifications.length;
+            badge.style.display = state.notifications.length > 0 ? 'flex' : 'none';
+        }
+
+        function showToastNotification(notification) {
+            const toast = document.getElementById('toastNotification');
+            const icons = {
+                delivery: '📦',
+                break: '☕',
+                emergency: '🚨'
+            };
+            
+            toast.innerHTML = `
+                <div class="toast-icon">${icons[notification.type]}</div>
+                <div class="toast-content">
+                    <div class="toast-title">${notification.driver}</div>
+                    <div class="toast-message">${notification.message}</div>
+                </div>
+            `;
+            
+            toast.classList.add('show');
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 5000);
+        }
+
+        function updateNotificationPanel() {
+            const panel = document.getElementById('notificationPanel');
+            
+            panel.innerHTML = `
+                <div class="notification-header">
+                    <div style="font-weight: 600;">Bildirimler</div>
+                    <button style="background: none; border: none; color: white; cursor: pointer;" onclick="clearNotifications()">
+                        Temizle
+                    </button>
+                </div>
+                <div class="notification-list">
+                    ${state.notifications.map(n => `
+                        <div class="notification-item ${n.type}">
+                            <div style="flex: 1;">
+                                <div style="font-weight: 600; margin-bottom: 4px;">${n.driver}</div>
+                                <div>${n.message}</div>
+                                <div class="notification-time">${n.time}</div>
+                            </div>
+                        </div>
+                    `).join('')}
+                    ${state.notifications.length === 0 ? '<div style="text-align: center; padding: 40px; color: #666;">Bildirim yok</div>' : ''}
+                </div>
+            `;
+        }
+
+        function clearNotifications() {
+            state.notifications = [];
+            updateNotificationBadge();
+            updateNotificationPanel();
+        }
+
+        // REPORTS PANEL
+        function initReportsPanel() {
+            const panel = document.getElementById('reportsPanel');
+            
+            panel.innerHTML = `
+                <div class="reports-header">
+                    <div style="font-size: 18px; font-weight: 700;">📊 Raporlar & İstatistikler</div>
+                    <div class="reports-close" onclick="closeReportsPanel()">✕</div>
+                </div>
+                <div class="reports-content">
+                    <div class="report-section">
+                        <div class="report-title">📦 Bugünün Paketleri</div>
+                        <div class="stat-card">
+                            <div class="stat-card-header">Toplam Paket</div>
+                            <div class="stat-card-value">53</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-card-header">Tamamlanan</div>
+                            <div class="stat-card-value" id="reportCompleted">25</div>
+                            <div style="width: 100%; height: 8px; background: #e5e7eb; border-radius: 4px; margin-top: 8px; overflow: hidden;">
+                                <div style="width: 47%; height: 100%; background: #10b981;"></div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-card-header">Devam Eden</div>
+                            <div class="stat-card-value" id="reportPending">28</div>
+                        </div>
+                    </div>
+                    
+                    <div class="report-section">
+                        <div class="report-title">📈 Günlük Performans</div>
+                        <div class="stat-card">
+                            <div class="stat-card-header">Ortalama Teslimat Süresi</div>
+                            <div class="stat-card-value">8<small style="font-size: 16px;">dk</small></div>
+                            <div class="stat-card-change">↓ %22 daha hızlı</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-card-header">Toplam Mesafe</div>
+                            <div class="stat-card-value">287<small style="font-size: 16px;">km</small></div>
+                            <div class="stat-card-change">↓ %35 tasarruf</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-card-header">Yakıt Tüketimi</div>
+                            <div class="stat-card-value">₺540</div>
+                            <div class="stat-card-change">↓ %33 (~₺180 tasarruf)</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-card-header">On-Time Delivery</div>
+                            <div class="stat-card-value">94<small style="font-size: 16px;">%</small></div>
+                            <div class="stat-card-change">🎯 Hedefin üstünde</div>
+                        </div>
+                    </div>
+                    
+                    <div class="report-section">
+                        <div class="report-title">🧠 AI Öğrenme Eğrisi</div>
+                        <div class="learning-chart">
+                            ${Array.from({length: 30}, (_, i) => {
+                                const height = 28 + (i * 0.5);
+                                return `<div class="chart-bar" style="height: ${height}%;" title="Gün ${i+1}: ${height.toFixed(0)}%"></div>`;
+                            }).join('')}
+                        </div>
+                        <div style="text-align: center; margin-top: 10px; font-size: 13px; color: #666;">
+                            Gün 1: %28 → Gün 30: %42 iyileştirme
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function closeReportsPanel() {
+            document.getElementById('reportsPanel').classList.remove('active');
+        }
+
+        // USER MANAGEMENT (SÜRÜCÜ YÖNETİMİ)
+// Bu bölüm; demo amaçlı basit bir sürücü yönetim ekranı oluşturur.
+// - Var olan sürücülerin listelenmesi
+// - Bilgilerin (isim, kullanıcı adı, telefon, araç rengi) düzenlenmesi
+// Gerçek üründe bu kısım bir API / veritabanı katmanına bağlanacak şekilde tasarlanabilir.
+        // USER MANAGEMENT (SÜRÜCÜ YÖNETİMİ)
+// Bu bölüm; demo amaçlı basit bir sürücü yönetim ekranı oluşturur.
+// - Var olan sürücülerin listelenmesi
+// - Bilgilerin (isim, kullanıcı adı, telefon, araç rengi) düzenlenmesi
+// Gerçek üründe bu kısım bir API / veritabanı katmanına bağlanacak şekilde tasarlanabilir.
+        function openUserManagement() {
+            const modal = document.getElementById('smsModal');
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width: 700px; max-height: 80vh; overflow-y: auto;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; position: sticky; top: 0; background: white; padding-bottom: 15px; border-bottom: 2px solid #f3f4f6;">
+                        <div class="modal-title" style="margin: 0;">👥 Sürücü Yönetimi</div>
+                        <button onclick="closeUserManagement()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666;">✕</button>
+                    </div>
+                    
+                    <button onclick="showAddUserForm()" style="width: 100%; padding: 14px; background: linear-gradient(135deg, #10b981, #059669); color: white; border: none; border-radius: 12px; font-weight: 600; margin-bottom: 20px; cursor: pointer; font-size: 15px; transition: all 0.3s;"
+                        onmouseover="this.style.transform='translateY(-2px)'"
+                        onmouseout="this.style.transform='translateY(0)'">
+                        ➕ Yeni Sürücü Ekle
+                    </button>
+                    
+                    <div id="userListContainer">
+                        ${renderUserList()}
+                    </div>
+                </div>
+            `;
+            modal.classList.add('active');
+        }
+        
+        function closeUserManagement() {
+            document.getElementById('smsModal').classList.remove('active');
+        }
+        
+        function renderUserList() {
+            return state.vehicles.map(user => `
+                <div style="background: #f8f9fa; padding: 16px; border-radius: 12px; margin-bottom: 12px; border-left: 4px solid ${user.color === 'blue' ? '#3b82f6' : user.color === 'green' ? '#10b981' : '#f59e0b'};">
+                    <div style="display: flex; justify-content: space-between; align-items: start;">
+                        <div style="flex: 1;">
+                            <div style="font-size: 16px; font-weight: 700; color: #333; margin-bottom: 8px;">
+                                ${user.name}
+                            </div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 13px; color: #666;">
+                                <div>👤 <strong>${user.username}</strong></div>
+                                <div>📞 ${user.phone}</div>
+                                <div>🔑 ${user.password}</div>
+                                <div>🎨 <span style="display: inline-block; width: 12px; height: 12px; background: ${user.color === 'blue' ? '#3b82f6' : user.color === 'green' ? '#10b981' : '#f59e0b'}; border-radius: 50%; margin-right: 4px;"></span>${user.color}</div>
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 8px;">
+                            <button onclick='editUser(${user.id})' style="padding: 8px 12px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 600;">
+                                ✏️ Düzenle
+                            </button>
+                            <button onclick='deleteUser(${user.id})' style="padding: 8px 12px; background: #ef4444; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 600;">
+                                🗑️ Sil
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        function showAddUserForm() {
+            const modal = document.getElementById('smsModal');
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width: 500px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <div class="modal-title" style="margin: 0;">➕ Yeni Sürücü Ekle</div>
+                        <button onclick="openUserManagement()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666;">←</button>
+                    </div>
+                    
+                    <div style="display: grid; gap: 15px;">
+                        <div>
+                            <label style="display: block; font-size: 12px; color: #666; margin-bottom: 8px; font-weight: 600;">AD SOYAD</label>
+                            <input type="text" id="newUserName" placeholder="Örn: Ali Veli" style="width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 10px; font-size: 14px;">
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 12px; color: #666; margin-bottom: 8px; font-weight: 600;">KULLANICI ADI</label>
+                            <input type="text" id="newUserUsername" placeholder="Örn: ali" style="width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 10px; font-size: 14px;">
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 12px; color: #666; margin-bottom: 8px; font-weight: 600;">ŞİFRE</label>
+                            <input type="text" id="newUserPassword" placeholder="Örn: 1234" style="width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 10px; font-size: 14px;">
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 12px; color: #666; margin-bottom: 8px; font-weight: 600;">TELEFON</label>
+                            <input type="text" id="newUserPhone" placeholder="0555 123 45 67" style="width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 10px; font-size: 14px;">
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 12px; color: #666; margin-bottom: 8px; font-weight: 600;">RENK</label>
+                            <select id="newUserColor" style="width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 10px; font-size: 14px;">
+                                <option value="blue">🔵 Mavi</option>
+                                <option value="green">🟢 Yeşil</option>
+                                <option value="orange">🟠 Turuncu</option>
+                                <option value="red">🔴 Kırmızı</option>
+                                <option value="purple">🟣 Mor</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div style="display: grid; gap: 10px; margin-top: 20px;">
+                        <button onclick="saveNewUser()" style="padding: 14px; background: linear-gradient(135deg, #10b981, #059669); color: white; border: none; border-radius: 12px; font-weight: 700; cursor: pointer; font-size: 15px;">
+                            ✓ Kaydet
+                        </button>
+                        <button onclick="openUserManagement()" style="padding: 14px; background: #e5e7eb; color: #666; border: none; border-radius: 12px; font-weight: 600; cursor: pointer; font-size: 15px;">
+                            İptal
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function saveNewUser() {
+            const name = document.getElementById('newUserName').value.trim();
+            const username = document.getElementById('newUserUsername').value.trim();
+            const password = document.getElementById('newUserPassword').value.trim();
+            const phone = document.getElementById('newUserPhone').value.trim();
+            const color = document.getElementById('newUserColor').value;
+            
+            if (!name || !username || !password || !phone) {
+                showToast('⚠️ Uyarı', 'Lütfen tüm alanları doldurun');
+                return;
+            }
+            
+            const newUser = {
+                id: state.vehicles.length + 1,
+                name,
+                username,
+                password,
+                phone,
+                color,
+                position: [40.9867, 29.1259],
+                completedDeliveries: 0,
+                totalDeliveries: 0,
+                startTime: '08:00',
+                estimatedEnd: '12:00',
+                avgSpeed: 30,
+                savings: 0,
+                status: 'active',
+                route: []
+            };
+            
+            state.vehicles.push(newUser);
+            document.getElementById('totalVehicles').textContent = state.vehicles.length;
+            updateAdminVehicles();
+            showToast('✅ Başarılı', `${name} eklendi`);
+            openUserManagement();
+        }
+        
+        function editUser(userId) {
+            const user = state.vehicles.find(v => v.id === userId);
+            if (!user) return;
+            
+            const modal = document.getElementById('smsModal');
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width: 500px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <div class="modal-title" style="margin: 0;">✏️ Sürücü Düzenle</div>
+                        <button onclick="openUserManagement()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666;">←</button>
+                    </div>
+                    
+                    <div style="display: grid; gap: 15px;">
+                        <div>
+                            <label style="display: block; font-size: 12px; color: #666; margin-bottom: 8px; font-weight: 600;">AD SOYAD</label>
+                            <input type="text" id="editUserName" value="${user.name}" style="width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 10px; font-size: 14px;">
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 12px; color: #666; margin-bottom: 8px; font-weight: 600;">KULLANICI ADI</label>
+                            <input type="text" id="editUserUsername" value="${user.username}" style="width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 10px; font-size: 14px;">
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 12px; color: #666; margin-bottom: 8px; font-weight: 600;">ŞİFRE</label>
+                            <input type="text" id="editUserPassword" value="${user.password}" style="width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 10px; font-size: 14px;">
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 12px; color: #666; margin-bottom: 8px; font-weight: 600;">TELEFON</label>
+                            <input type="text" id="editUserPhone" value="${user.phone}" style="width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 10px; font-size: 14px;">
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 12px; color: #666; margin-bottom: 8px; font-weight: 600;">RENK</label>
+                            <select id="editUserColor" style="width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 10px; font-size: 14px;">
+                                <option value="blue" ${user.color === 'blue' ? 'selected' : ''}>🔵 Mavi</option>
+                                <option value="green" ${user.color === 'green' ? 'selected' : ''}>🟢 Yeşil</option>
+                                <option value="orange" ${user.color === 'orange' ? 'selected' : ''}>🟠 Turuncu</option>
+                                <option value="red" ${user.color === 'red' ? 'selected' : ''}>🔴 Kırmızı</option>
+                                <option value="purple" ${user.color === 'purple' ? 'selected' : ''}>🟣 Mor</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div style="display: grid; gap: 10px; margin-top: 20px;">
+                        <button onclick="updateUser(${userId})" style="padding: 14px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 12px; font-weight: 700; cursor: pointer; font-size: 15px;">
+                            ✓ Güncelle
+                        </button>
+                        <button onclick="openUserManagement()" style="padding: 14px; background: #e5e7eb; color: #666; border: none; border-radius: 12px; font-weight: 600; cursor: pointer; font-size: 15px;">
+                            İptal
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function updateUser(userId) {
+            const user = state.vehicles.find(v => v.id === userId);
+            if (!user) return;
+            
+            user.name = document.getElementById('editUserName').value.trim();
+            user.username = document.getElementById('editUserUsername').value.trim();
+            user.password = document.getElementById('editUserPassword').value.trim();
+            user.phone = document.getElementById('editUserPhone').value.trim();
+            user.color = document.getElementById('editUserColor').value;
+            
+            updateAdminVehicles();
+            showToast('✅ Güncellendi', `${user.name} bilgileri güncellendi`);
+            openUserManagement();
+        }
+        
+        function deleteUser(userId) {
+            const user = state.vehicles.find(v => v.id === userId);
+            if (!user) return;
+            
+            if (confirm(`${user.name} silinecek. Emin misiniz?`)) {
+                state.vehicles = state.vehicles.filter(v => v.id !== userId);
+                document.getElementById('totalVehicles').textContent = state.vehicles.length;
+                updateAdminVehicles();
+                showToast('🗑️ Silindi', `${user.name} silindi`);
+                openUserManagement();
+            }
+        }
+        
+        // SIMPLE ANALYTICS
+        function showSimpleAnalytics() {
+            const modal = document.getElementById('smsModal');
+            
+            const totalDeliveries = state.vehicles.reduce((sum, v) => sum + (v.totalDeliveries || 0), 0);
+            const completedDeliveries = state.vehicles.reduce((sum, v) => sum + (v.completedDeliveries || 0), 0);
+            const avgSavings = state.vehicles.reduce((sum, v) => sum + (v.savings || 0), 0) / state.vehicles.length;
+            
+            const distanceSaved = Math.floor(totalDeliveries * 2.5 * (avgSavings / 100));
+            const costSavings = Math.floor(distanceSaved * 1.5 * 45 + totalDeliveries * 8 * 150);
+            const co2Saved = Math.floor(distanceSaved * 0.12);
+            
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <div>
+                            <div class="modal-title" style="margin: 0;">📊 İstatistikler & Raporlar</div>
+                            <div style="font-size: 13px; color: #666; margin-top: 3px;">Gerçek zamanlı performans metrikleri</div>
+                        </div>
+                        <button onclick="closeAnalytics()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666;">✕</button>
+                    </div>
+                    
+                    <!-- KPI Cards -->
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 25px;">
+                        <div style="background: linear-gradient(135deg, #3b82f6, #2563eb); padding: 20px; border-radius: 16px; color: white;">
+                            <div style="font-size: 14px; opacity: 0.9; margin-bottom: 8px;">Toplam Teslimat</div>
+                            <div style="font-size: 36px; font-weight: 700;">${totalDeliveries}</div>
+                            <div style="font-size: 12px; opacity: 0.8; margin-top: 5px;">+12% vs geçen hafta</div>
+                        </div>
+                        
+                        <div style="background: linear-gradient(135deg, #10b981, #059669); padding: 20px; border-radius: 16px; color: white;">
+                            <div style="font-size: 14px; opacity: 0.9; margin-bottom: 8px;">Tamamlanan</div>
+                            <div style="font-size: 36px; font-weight: 700;">${completedDeliveries}</div>
+                            <div style="font-size: 12px; opacity: 0.8; margin-top: 5px;">${totalDeliveries > 0 ? Math.floor((completedDeliveries / totalDeliveries) * 100) : 0}% tamamlandı</div>
+                        </div>
+                        
+                        <div style="background: linear-gradient(135deg, #f59e0b, #d97706); padding: 20px; border-radius: 16px; color: white;">
+                            <div style="font-size: 14px; opacity: 0.9; margin-bottom: 8px;">Ortalama Süre</div>
+                            <div style="font-size: 36px; font-weight: 700;">8dk</div>
+                            <div style="font-size: 12px; opacity: 0.8; margin-top: 5px;">-22% daha hızlı</div>
+                        </div>
+                        
+                        <div style="background: linear-gradient(135deg, #8b5cf6, #7c3aed); padding: 20px; border-radius: 16px; color: white;">
+                            <div style="font-size: 14px; opacity: 0.9; margin-bottom: 8px;">Günlük Tasarruf</div>
+                            <div style="font-size: 36px; font-weight: 700;">₺${Math.floor(costSavings / 30).toLocaleString('tr-TR')}</div>
+                            <div style="font-size: 12px; opacity: 0.8; margin-top: 5px;">Yakıt + Zaman</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Charts -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px;">
+                        <div style="background: #f8f9fa; padding: 20px; border-radius: 16px;">
+                            <div style="font-size: 16px; font-weight: 700; margin-bottom: 15px;">📈 Haftalık Trend</div>
+                            <div style="height: 200px; display: flex; align-items: flex-end; gap: 10px;">
+                                ${[45, 52, 48, 61, 55, 68, 73].map((val, i) => `
+                                    <div style="flex: 1; background: linear-gradient(to top, #667eea, #764ba2); border-radius: 6px 6px 0 0; height: ${val}%; position: relative;">
+                                        <div style="position: absolute; top: -20px; left: 50%; transform: translateX(-50%); font-size: 11px; font-weight: 700; color: #667eea;">${val}</div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                            <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 11px; color: #666;">
+                                <span>Pzt</span><span>Sal</span><span>Çar</span><span>Per</span><span>Cum</span><span>Cmt</span><span>Paz</span>
+                            </div>
+                        </div>
+                        
+                        <div style="background: linear-gradient(135deg, #10b981, #059669); padding: 20px; border-radius: 16px; color: white;">
+                            <div style="font-size: 16px; font-weight: 700; margin-bottom: 15px;">💰 Toplam Tasarruf</div>
+                            <div style="font-size: 48px; font-weight: 700; margin-bottom: 20px;">₺${costSavings.toLocaleString('tr-TR')}</div>
+                            <div style="display: grid; gap: 10px;">
+                                <div style="background: rgba(255,255,255,0.15); padding: 10px; border-radius: 8px; display: flex; justify-content: space-between;">
+                                    <span>⛽ Yakıt</span>
+                                    <strong>₺${Math.floor(costSavings * 0.4).toLocaleString('tr-TR')}</strong>
+                                </div>
+                                <div style="background: rgba(255,255,255,0.15); padding: 10px; border-radius: 8px; display: flex; justify-content: space-between;">
+                                    <span>⏱️ Zaman</span>
+                                    <strong>₺${Math.floor(costSavings * 0.6).toLocaleString('tr-TR')}</strong>
+                                </div>
+                                <div style="background: rgba(255,255,255,0.15); padding: 10px; border-radius: 8px; display: flex; justify-content: space-between;">
+                                    <span>🛣️ Mesafe</span>
+                                    <strong>${distanceSaved} km</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Leaderboard & Carbon -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <div style="background: #f8f9fa; padding: 20px; border-radius: 16px;">
+                            <div style="font-size: 16px; font-weight: 700; margin-bottom: 15px;">🏆 Sürücü Sıralaması</div>
+                            ${state.vehicles.map((v, i) => `
+                                <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: white; border-radius: 12px; margin-bottom: 8px;">
+                                    <div style="font-size: 24px; width: 40px; text-align: center;">${['🥇','🥈','🥉'][i] || (i+1)+'.'}</div>
+                                    <div style="flex: 1;">
+                                        <div style="font-weight: 600;">${v.name}</div>
+                                        <div style="font-size: 12px; color: #666;">${v.completedDeliveries || 0} teslimat • %${v.savings || 0} tasarruf</div>
+                                    </div>
+                                    <div style="font-size: 18px; font-weight: 700; color: #667eea;">${(v.completedDeliveries || 0) * 10 + (v.savings || 0)}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                        
+                        <div style="background: linear-gradient(135deg, #34d399, #10b981); padding: 20px; border-radius: 16px; color: white;">
+                            <div style="font-size: 16px; font-weight: 700; margin-bottom: 15px;">🌱 Çevre Etkisi</div>
+                            <div style="display: flex; align-items: center; gap: 20px; margin: 20px 0;">
+                                <div style="font-size: 64px;">🌍</div>
+                                <div>
+                                    <div style="font-size: 40px; font-weight: 700;">${co2Saved} kg</div>
+                                    <div style="font-size: 14px; opacity: 0.9;">CO₂ Tasarrufu</div>
+                                </div>
+                            </div>
+                            <div style="background: rgba(255,255,255,0.15); padding: 15px; border-radius: 12px;">
+                                <div style="margin-bottom: 8px;">🌳 <strong>${Math.floor(co2Saved / 21)} ağaç</strong> dikilmesine eşdeğer</div>
+                                <div>🚗 <strong>${distanceSaved} km</strong> daha az yol</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            modal.classList.add('active');
+        }
+        
+        function closeAnalytics() {
+            document.getElementById('smsModal').classList.remove('active');
+        }
+        
+        // POD History
+        function showPODHistory(vehicleId) {
+            const vehicle = state.vehicles.find(v => v.id === vehicleId);
+            if (!vehicle) return;
+            
+            // Collect all PODs from packages
+            let allPODs = [];
+            if (state.currentUser && vehicle.id === state.currentUser.id && state.packages.length > 0) {
+                state.packages.forEach((pkg, idx) => {
+                    if (pkg.pods && pkg.pods.length > 0) {
+                        pkg.pods.forEach(pod => {
+                            allPODs.push({
+                                ...pod,
+                                packageIndex: idx + 1,
+                                address: pkg.address
+                            });
+                        });
+                    }
+                });
+            }
+            
+            const modal = document.getElementById('smsModal');
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
+                        <div>
+                            <div style="font-size: 24px; font-weight: 700; margin-bottom: 5px;">
+                                📸 Teslimat Kanıtları
+                            </div>
+                            <div style="color: #666; font-size: 14px;">
+                                ${vehicle.name} - ${allPODs.length} teslimat
+                            </div>
+                        </div>
+                        <button onclick="closePODHistory()" style="background: none; border: none; font-size: 28px; cursor: pointer; color: #666;">✕</button>
+                    </div>
+                    
+                    ${allPODs.length === 0 ? `
+                        <div style="text-align: center; padding: 60px 20px; color: #999;">
+                            <div style="font-size: 64px; margin-bottom: 15px;">📦</div>
+                            <div style="font-size: 18px;">Henüz teslimat kanıtı yok</div>
+                        </div>
+                    ` : `
+                        <div style="display: grid; gap: 20px;">
+                            ${allPODs.map((pod, idx) => `
+                                <div style="background: #f8f9fa; padding: 20px; border-radius: 16px; border: 2px solid #e5e7eb;">
+                                    <div style="display: flex; justify-content: between; align-items: center; margin-bottom: 15px;">
+                                        <div>
+                                            <div style="font-size: 16px; font-weight: 700; color: #667eea;">
+                                                #${pod.packageIndex} Teslimat
+                                            </div>
+                                            <div style="font-size: 13px; color: #666; margin-top: 3px;">
+                                                ${pod.address}
+                                            </div>
+                                        </div>
+                                        <div style="font-size: 12px; color: #999; text-align: right;">
+                                            📅 ${new Date(pod.timestamp).toLocaleDateString('tr-TR')}<br>
+                                            ⏰ ${new Date(pod.timestamp).toLocaleTimeString('tr-TR')}
+                                        </div>
+                                    </div>
+                                    
+                                    <div style="display: grid; grid-template-columns: ${pod.photo && pod.signature ? '1fr 1fr' : '1fr'}; gap: 15px;">
+                                        ${pod.photo ? `
+                                            <div>
+                                                <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: #666;">📷 Fotoğraf</div>
+                                                <img src="${pod.photo}" style="width: 100%; height: 250px; object-fit: cover; border-radius: 12px; cursor: pointer;" 
+                                                    onclick="window.open('${pod.photo}', '_blank')" />
+                                            </div>
+                                        ` : ''}
+                                        
+                                        ${pod.signature ? `
+                                            <div>
+                                                <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: #666;">✍️ İmza</div>
+                                                <div style="background: white; padding: 10px; border-radius: 12px; border: 2px dashed #ddd;">
+                                                    <img src="${pod.signature}" style="width: 100%; height: 230px; object-fit: contain;" />
+                                                </div>
+                                            </div>
+                                        ` : ''}
+                                    </div>
+                                    
+                                    ${pod.location ? `
+                                        <div style="margin-top: 12px; padding: 10px; background: white; border-radius: 8px; font-size: 12px; color: #666;">
+                                            📍 GPS: ${pod.location.lat}, ${pod.location.lng}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    `}
+                </div>
+            `;
+            modal.classList.add('active');
+        }
+        
+        function closePODHistory() {
+            document.getElementById('smsModal').classList.remove('active');
+        }
+        
+        // Utility
+        function showToast(title, message) {
+            const toast = document.getElementById('toastNotification');
+            toast.innerHTML = `
+                <div class="toast-icon">ℹ️</div>
+                <div class="toast-content">
+                    <div class="toast-title">${title}</div>
+                    <div class="toast-message">${message}</div>
+                </div>
+            `;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        // Event Listeners
+        document.getElementById('notificationBell').addEventListener('click', () => {
+            const panel = document.getElementById('notificationPanel');
+            panel.classList.toggle('active');
+        });
+
+        document.getElementById('reportsBtn').addEventListener('click', () => {
+            const panel = document.getElementById('reportsPanel');
+            panel.classList.add('active');
+        });
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            renderMobileApp();
+            initAdminMap();
+            initReportsPanel();
+            updateNotificationPanel();
+            
+            // Start global timer for all paused vehicles
+            setInterval(() => {
+                updateAdminPauseTimers();
+            }, 1000);
+            
+            // Simulate some initial notifications
+            setTimeout(() => {
+                addNotification('break', 'Mehmet Demir', 'Mola başladı');
+            }, 10000);
+            
+            setTimeout(() => {
+                addNotification('emergency', 'Can Özkan', 'Kaza bildirimi');
+            }, 15000);
+        });
+    </script>
+</body>
+</html>
